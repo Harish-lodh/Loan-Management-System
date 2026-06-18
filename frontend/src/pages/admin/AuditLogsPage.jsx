@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import PaginationControls from '../../components/PaginationControls';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast } from '../../utils/toast';
 
 export default function AuditLogsPage() {
   const [data, setData] = useState({ items: [], meta: null });
@@ -28,7 +29,7 @@ export default function AuditLogsPage() {
         setData(logsResponse.data);
         setVerification(verifyResponse.data);
       })
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(showErrorToast(err)))
       .finally(() => setLoading(false));
   }, [filters]);
 

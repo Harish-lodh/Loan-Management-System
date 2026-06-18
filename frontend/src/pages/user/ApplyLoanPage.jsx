@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Send } from 'lucide-react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const employmentOptions = ['SALARIED', 'SELF_EMPLOYED', 'BUSINESS_OWNER', 'CONTRACT', 'UNEMPLOYED'];
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
@@ -34,7 +35,7 @@ export default function ApplyLoanPage() {
         setProducts(active);
         setProductId(active[0]?.id ?? '');
       })
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   }, []);
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function ApplyLoanPage() {
           tenure: Number(product.minimumTenure || current.tenure),
         }));
       })
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   }, [productId]);
 
   function update(name, value) {
@@ -97,8 +98,9 @@ export default function ApplyLoanPage() {
       const draft = await api.post('/api/v1/loan-applications', payload);
       const submitted = await api.post(`/api/v1/loan-applications/${draft.data.application.id}/submit`);
       setResult(submitted.data);
+      showSuccessToast('Application submitted successfully');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setLoading(false);
     }

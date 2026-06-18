@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import RepaymentTable from '../../components/RepaymentTable';
 import ScoreBreakdown from '../../components/ScoreBreakdown';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
@@ -17,7 +18,7 @@ export default function LoanDetailsPage() {
     api
       .get(`/loans/${id}`)
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   };
 
   useEffect(load, [id]);
@@ -26,9 +27,10 @@ export default function LoanDetailsPage() {
     setBusyId(repaymentId);
     try {
       await api.post(`/repayments/${repaymentId}/mark-paid`);
+      showSuccessToast('Repayment marked as paid');
       load();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setBusyId('');
     }
@@ -39,9 +41,10 @@ export default function LoanDetailsPage() {
     setError('');
     try {
       await api.post(`/loans/applications/${id}/submit`);
+      showSuccessToast('Application submitted for review');
       load();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setBusyId('');
     }

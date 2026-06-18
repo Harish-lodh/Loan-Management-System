@@ -36,19 +36,19 @@ export class OrganizationsController {
   @Post()
   @Permissions('organization.create')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateOrganizationDto) {
-    return this.masterData.createOrganization(dto, user.id);
+    return this.masterData.createOrganization(dto, user);
   }
 
   @Get()
   @Permissions('organization.view')
-  list() {
-    return this.masterData.listOrganizations();
+  list(@CurrentUser() user: RequestUser) {
+    return this.masterData.listOrganizations(user);
   }
 
   @Get(':id')
   @Permissions('organization.view')
-  get(@Param('id') id: string) {
-    return this.masterData.getOrganization(id);
+  get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.masterData.getOrganization(id, user);
   }
 }
 
@@ -60,79 +60,79 @@ export class ProductsController {
   @Post()
   @Permissions('product.create')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateProductDto) {
-    return this.masterData.createProduct(dto, user.id);
+    return this.masterData.createProduct(dto, user);
   }
 
   @Get()
   @Permissions('product.view')
-  list() {
-    return this.masterData.listProducts();
+  list(@CurrentUser() user: RequestUser) {
+    return this.masterData.listProducts(user);
   }
 
   @Get(':id')
   @Permissions('product.view')
-  get(@Param('id') id: string) {
-    return this.masterData.getProduct(id);
+  get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.masterData.getProduct(id, user);
   }
 
   @Patch(':id')
   @Permissions('product.update')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.masterData.updateProduct(id, dto, user.id);
+    return this.masterData.updateProduct(id, dto, user);
   }
 
   @Post(':id/clone')
   @Permissions('product.create')
   clone(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.masterData.cloneProduct(id, user.id);
+    return this.masterData.cloneProduct(id, user);
   }
 
   @Post(':id/publish')
   @Permissions('product.publish')
   publish(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.masterData.publishProduct(id, user.id);
+    return this.masterData.publishProduct(id, user);
   }
 
   @Post(':id/activate')
   @Permissions('product.update')
   activate(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.masterData.setProductStatus(id, MasterStatus.ACTIVE, user.id);
+    return this.masterData.setProductStatus(id, MasterStatus.ACTIVE, user);
   }
 
   @Post(':id/deactivate')
   @Permissions('product.update')
   deactivate(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.masterData.setProductStatus(id, MasterStatus.INACTIVE, user.id);
+    return this.masterData.setProductStatus(id, MasterStatus.INACTIVE, user);
   }
 
   @Get(':id/versions')
   @Permissions('product.view')
-  versions(@Param('id') id: string) {
-    return this.masterData.listProductVersions(id);
+  versions(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.masterData.listProductVersions(id, user);
   }
 
   @Get(':id/application-schema')
   @Permissions('product.view')
-  applicationSchema(@Param('id') id: string) {
-    return this.masterData.applicationSchema(id);
+  applicationSchema(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.masterData.applicationSchema(id, user);
   }
 
   @Post(':id/application-fields')
   @Permissions('product.update')
-  addField(@Param('id') id: string, @Body() dto: CreateApplicationFieldDto) {
-    return this.masterData.addApplicationField(id, dto);
+  addField(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: CreateApplicationFieldDto) {
+    return this.masterData.addApplicationField(id, dto, user);
   }
 
   @Post(':id/eligibility-rules')
   @Permissions('product.update')
   addRule(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: CreateEligibilityRuleDto) {
-    return this.masterData.addEligibilityRule(id, dto, user.id);
+    return this.masterData.addEligibilityRule(id, dto, user);
   }
 
   @Post(':id/workflow-steps')
   @Permissions('product.update')
-  addWorkflowStep(@Param('id') id: string, @Body() dto: CreateWorkflowStepDto) {
-    return this.masterData.addWorkflowStep(id, dto);
+  addWorkflowStep(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: CreateWorkflowStepDto) {
+    return this.masterData.addWorkflowStep(id, dto, user);
   }
 }
 
@@ -144,37 +144,37 @@ export class PartnersController {
   @Post()
   @Permissions('partner.create')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreatePartnerDto) {
-    return this.masterData.createPartner(dto, user.id);
+    return this.masterData.createPartner(dto, user);
   }
 
   @Get()
   @Permissions('partner.view')
-  list() {
-    return this.masterData.listPartners();
+  list(@CurrentUser() user: RequestUser) {
+    return this.masterData.listPartners(user);
   }
 
   @Get(':id')
   @Permissions('partner.view')
-  get(@Param('id') id: string) {
-    return this.masterData.getPartner(id);
+  get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.masterData.getPartner(id, user);
   }
 
   @Patch(':id')
   @Permissions('partner.update')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdatePartnerDto) {
-    return this.masterData.updatePartner(id, dto, user.id);
+    return this.masterData.updatePartner(id, dto, user);
   }
 
   @Post(':id/products')
   @Permissions('partner.update')
-  assignProduct(@Param('id') id: string, @Body() dto: AssignPartnerProductDto) {
-    return this.masterData.assignProductToPartner(id, dto);
+  assignProduct(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: AssignPartnerProductDto) {
+    return this.masterData.assignProductToPartner(id, dto, user);
   }
 
   @Delete(':id/products/:productId')
   @Permissions('partner.update')
-  removeProduct(@Param('id') id: string, @Param('productId') productId: string) {
-    return this.masterData.removePartnerProduct(id, productId);
+  removeProduct(@CurrentUser() user: RequestUser, @Param('id') id: string, @Param('productId') productId: string) {
+    return this.masterData.removePartnerProduct(id, productId, user);
   }
 }
 
@@ -185,14 +185,14 @@ export class ServiceProvidersController {
 
   @Post()
   @Permissions('provider.configure')
-  create(@Body() dto: CreateServiceProviderDto) {
-    return this.masterData.createServiceProvider(dto);
+  create(@CurrentUser() user: RequestUser, @Body() dto: CreateServiceProviderDto) {
+    return this.masterData.createServiceProvider(dto, user);
   }
 
   @Get()
   @Permissions('provider.view')
-  list() {
-    return this.masterData.listServiceProviders();
+  list(@CurrentUser() user: RequestUser) {
+    return this.masterData.listServiceProviders(user);
   }
 }
 
@@ -213,8 +213,8 @@ export class ConfigurableLoanApplicationsController {
 
   @Get()
   @Permissions('application.view')
-  list() {
-    return this.applications.findAllForAdmin();
+  list(@CurrentUser() user: RequestUser) {
+    return this.applications.findAllForAdmin(user);
   }
 
   @Get(':id')
@@ -279,8 +279,8 @@ export class ConfigurableLoanApplicationsController {
 
   @Get(':id/agreements')
   @Permissions('application.view')
-  agreements(@Param('id') id: string) {
-    return this.documents.listGeneratedDocuments(id);
+  agreements(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.documents.listGeneratedDocuments(id, user);
   }
 
   @Post(':id/esign/initiate')
@@ -315,20 +315,20 @@ export class DocumentTemplatesController {
 
   @Get()
   @Permissions('agreement.template.view')
-  list() {
-    return this.documents.listTemplates();
+  list(@CurrentUser() user: RequestUser) {
+    return this.documents.listTemplates(user);
   }
 
   @Get(':id')
   @Permissions('agreement.template.view')
-  get(@Param('id') id: string) {
-    return this.documents.getTemplate(id);
+  get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.documents.getTemplate(id, user);
   }
 
   @Post(':id/preview')
   @Permissions('agreement.template.view')
-  preview(@Param('id') id: string, @Body() dto: PreviewTemplateDto) {
-    return this.documents.previewTemplate(id, dto);
+  preview(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: PreviewTemplateDto) {
+    return this.documents.previewTemplate(id, dto, user);
   }
 
   @Post(':id/publish')
@@ -351,8 +351,8 @@ export class ESignRequestsController {
 
   @Get(':id/status')
   @Permissions('application.view')
-  status(@Param('id') id: string) {
-    return this.providers.getESignStatus(id);
+  status(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.providers.getESignStatus(id, user);
   }
 }
 
@@ -363,8 +363,8 @@ export class ENachMandatesController {
 
   @Get(':id/status')
   @Permissions('application.view')
-  status(@Param('id') id: string) {
-    return this.providers.getENachStatus(id);
+  status(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.providers.getENachStatus(id, user);
   }
 
   @Post(':id/cancel')
@@ -381,8 +381,8 @@ export class DisbursementsController {
 
   @Get(':id')
   @Permissions('application.view')
-  get(@Param('id') id: string) {
-    return this.providers.getDisbursement(id);
+  get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.providers.getDisbursement(id, user);
   }
 
   @Post(':id/retry')

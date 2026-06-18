@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { LoadingState } from '../../components/AsyncState';
 import RepaymentTable from '../../components/RepaymentTable';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 export default function RepaymentsPage() {
   const [repayments, setRepayments] = useState([]);
@@ -13,7 +14,7 @@ export default function RepaymentsPage() {
     api
       .get('/repayments/my')
       .then((response) => setRepayments(response.data))
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(showErrorToast(err)))
       .finally(() => setLoading(false));
   };
 
@@ -24,9 +25,10 @@ export default function RepaymentsPage() {
     setError('');
     try {
       await api.post(`/repayments/${id}/mark-paid`);
+      showSuccessToast('Repayment marked as paid');
       load();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setBusyId('');
     }

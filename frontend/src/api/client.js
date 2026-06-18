@@ -77,10 +77,16 @@ api.interceptors.response.use(
   },
 );
 
-export function errorMessage(error) {
-  const message = error.response?.data?.message;
+export function errorMessage(error, fallback = 'Something went wrong') {
+  const message = error?.response?.data?.message;
   if (Array.isArray(message)) {
-    return message.join(', ');
+    const validationMessage = message.filter(Boolean).join(', ');
+    if (validationMessage) {
+      return validationMessage;
+    }
   }
-  return message || error.message || 'Something went wrong';
+  if (typeof message === 'string' && message.trim()) {
+    return message;
+  }
+  return error?.response?.data?.error || error?.message || fallback;
 }

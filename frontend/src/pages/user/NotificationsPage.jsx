@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import NotificationList from '../../components/NotificationList';
 import PaginationControls from '../../components/PaginationControls';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 export default function NotificationsPage() {
   const [data, setData] = useState({ items: [], unreadCount: 0, meta: null });
@@ -22,20 +23,32 @@ export default function NotificationsPage() {
         },
       })
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(showErrorToast(err)))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, [filters]);
 
   async function markRead(id) {
-    await api.patch(`/notifications/${id}/read`);
-    load();
+    setError('');
+    try {
+      await api.patch(`/notifications/${id}/read`);
+      showSuccessToast('Notification marked as read');
+      load();
+    } catch (err) {
+      setError(showErrorToast(err));
+    }
   }
 
   async function markAllRead() {
-    await api.patch('/notifications/read-all');
-    load();
+    setError('');
+    try {
+      await api.patch('/notifications/read-all');
+      showSuccessToast('All notifications marked as read');
+      load();
+    } catch (err) {
+      setError(showErrorToast(err));
+    }
   }
 
   if (error) return <ErrorState message={error} />;

@@ -63,8 +63,10 @@ export class ConfigurationResolverService {
     throw new NotFoundException('Application has no product configuration');
   }
 
-  async resolveLive(productId: string, partnerId?: string | null): Promise<ResolvedConfiguration> {
-    const product = await this.productsRepository.findOne({ where: { id: productId } });
+  async resolveLive(productId: string, partnerId?: string | null, organizationId?: string | null): Promise<ResolvedConfiguration> {
+    const product = await this.productsRepository.findOne({
+      where: organizationId ? { id: productId, organizationId } : { id: productId },
+    });
     if (!product) {
       throw new NotFoundException('Product not found');
     }
@@ -81,7 +83,7 @@ export class ConfigurationResolverService {
     }
 
     const [partner, partnerProduct, fields, rules, workflowSteps] = await Promise.all([
-      partnerId ? this.partnersRepository.findOne({ where: { id: partnerId } }) : Promise.resolve(null),
+      partnerId ? this.partnersRepository.findOne({ where: { id: partnerId, organizationId: product.organizationId } }) : Promise.resolve(null),
       partnerId ? this.partnerProductsRepository.findOne({ where: { partnerId, productId } }) : Promise.resolve(null),
       this.fieldsRepository.find({
         where: [
@@ -105,6 +107,9 @@ export class ConfigurationResolverService {
         order: { displayOrder: 'ASC' },
       }),
     ]);
+    if (partnerId && !partner) {
+      throw new NotFoundException('Partner not found');
+    }
 
     const capabilities = this.resolveCapabilities(product, partnerProduct);
     const workflow = workflowSteps.length

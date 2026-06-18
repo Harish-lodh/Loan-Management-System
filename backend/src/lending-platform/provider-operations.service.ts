@@ -29,6 +29,7 @@ import { generateRepaymentSchedule } from '../loans/loan-calculations';
 import { ConfigurationResolverService } from './configuration-resolver.service';
 import { moneyToString } from './money.util';
 import { ProviderWebhookDto } from './dto';
+import { assertOrganizationAccess } from './organization-scope';
 
 @Injectable()
 export class ProviderOperationsService {
@@ -66,7 +67,7 @@ export class ProviderOperationsService {
   ) {}
 
   async initiateESign(applicationId: string, user: RequestUser, idempotencyKey?: string) {
-    const application = await this.application(applicationId);
+    const application = await this.application(applicationId, user);
     if (application.status !== LoanApplicationStatus.ESIGN_PENDING) {
       throw new BadRequestException('Application is not waiting for eSign');
     }
@@ -114,12 +115,17 @@ export class ProviderOperationsService {
     return request;
   }
 
-  getESignStatus(id: string) {
-    return this.esignRepository.findOne({ where: { id }, relations: { statusHistory: true } });
+  async getESignStatus(id: string, user: RequestUser) {
+    const request = await this.esignRepository.findOne({ where: { id }, relations: { statusHistory: true } });
+    if (!request) {
+      throw new NotFoundException('eSign request not found');
+    }
+    assertOrganizationAccess(user, request.organizationId, 'eSign request');
+    return request;
   }
 
   async initiateENach(applicationId: string, user: RequestUser, idempotencyKey?: string) {
-    const application = await this.application(applicationId);
+    const application = await this.application(applicationId, user);
     if (application.status !== LoanApplicationStatus.ENACH_PENDING) {
       throw new BadRequestException('Application is not waiting for eNACH');
     }
@@ -158,8 +164,13 @@ export class ProviderOperationsService {
     return mandate;
   }
 
-  getENachStatus(id: string) {
-    return this.enachRepository.findOne({ where: { id }, relations: { statusHistory: true } });
+  async getENachStatus(id: string, user: RequestUser) {
+    const mandate = await this.enachRepository.findOne({ where: { id }, relations: { statusHistory: true } });
+    if (!mandate) {
+      throw new NotFoundException('eNACH mandate not found');
+    }
+    assertOrganizationAccess(user, mandate.organizationId, 'eNACH mandate');
+    return mandate;
   }
 
   async cancelENach(id: string, user: RequestUser) {
@@ -167,6 +178,7 @@ export class ProviderOperationsService {
     if (!mandate) {
       throw new NotFoundException('eNACH mandate not found');
     }
+    assertOrganizationAccess(user, mandate.organizationId, 'eNACH mandate');
     const previous = mandate.status;
     mandate.status = ENachMandateStatus.CANCELLED;
     mandate.cancelledAt = new Date();
@@ -176,7 +188,7 @@ export class ProviderOperationsService {
   }
 
   async initiateDisbursement(applicationId: string, user: RequestUser, idempotencyKey?: string) {
-    const application = await this.application(applicationId);
+    const application = await this.application(applicationId, user);
     if (application.status !== LoanApplicationStatus.READY_FOR_DISBURSEMENT) {
       throw new BadRequestException('Application is not ready for disbursement');
     }
@@ -218,8 +230,13 @@ export class ProviderOperationsService {
     return disbursement;
   }
 
-  getDisbursement(id: string) {
-    return this.disbursementsRepository.findOne({ where: { id }, relations: { statusHistory: true } });
+  async getDisbursement(id: string, user: RequestUser) {
+    const disbursement = await this.disbursementsRepository.findOne({ where: { id }, relations: { statusHistory: true } });
+    if (!disbursement) {
+      throw new NotFoundException('Disbursement not found');
+    }
+    assertOrganizationAccess(user, disbursement.organizationId, 'disbursement');
+    return disbursement;
   }
 
   async retryDisbursement(id: string, user: RequestUser) {
@@ -227,6 +244,7 @@ export class ProviderOperationsService {
     if (!disbursement) {
       throw new NotFoundException('Disbursement not found');
     }
+    assertOrganizationAccess(user, disbursement.organizationId, 'disbursement');
     if (![DisbursementStatus.FAILED, DisbursementStatus.CANCELLED].includes(disbursement.status)) {
       throw new BadRequestException('Only failed or cancelled disbursements can be retried');
     }
@@ -500,15 +518,18 @@ export class ProviderOperationsService {
 
   private async provider(organizationId: string, providerType: ProviderType, preferredProviderId?: string | null) {
     if (preferredProviderId) {
-      return this.providersRepository.findOne({ where: { id: preferredProviderId } });
+      return this.providersRepository.findOne({ where: { id: preferredProviderId, organizationId } });
     }
     return this.providersRepository.findOne({ where: { organizationId, providerType }, order: { createdAt: 'ASC' } });
   }
 
-  private async application(id: string) {
+  private async application(id: string, user?: RequestUser) {
     const application = await this.applicationsRepository.findOne({ where: { id } });
     if (!application) {
       throw new NotFoundException('Loan application not found');
+    }
+    if (user) {
+      assertOrganizationAccess(user, application.organizationId, 'application');
     }
     return application;
   }

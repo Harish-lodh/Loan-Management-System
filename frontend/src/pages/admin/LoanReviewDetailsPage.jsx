@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import ScoreBreakdown from '../../components/ScoreBreakdown';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
@@ -19,7 +20,7 @@ export default function LoanReviewDetailsPage() {
     api
       .get(`/admin/loan-applications/${id}`)
       .then((response) => setApplication(response.data))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   };
 
   useEffect(load, [id]);
@@ -29,9 +30,10 @@ export default function LoanReviewDetailsPage() {
     setError('');
     try {
       await api.patch(`/admin/loan-applications/${id}/approve`, { comment });
+      showSuccessToast('Loan application approved');
       navigate('/admin/applications');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setLoading(false);
     }
@@ -42,9 +44,10 @@ export default function LoanReviewDetailsPage() {
     setError('');
     try {
       await api.patch(`/admin/loan-applications/${id}/reject`, { comment });
+      showSuccessToast('Loan application rejected');
       navigate('/admin/applications');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setLoading(false);
     }

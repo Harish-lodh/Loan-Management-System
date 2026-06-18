@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Save, ShieldCheck } from 'lucide-react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import { useAuth } from '../../context/AuthContext';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 export default function ProfilePage() {
   const { refreshUser } = useAuth();
@@ -25,7 +26,7 @@ export default function ProfilePage() {
           annualIncome: response.data.annualIncome || '',
         });
       })
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(showErrorToast(err)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -45,8 +46,9 @@ export default function ProfilePage() {
       });
       await refreshUser();
       setMessage('Profile updated.');
+      showSuccessToast('Profile updated');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setSaving(false);
     }
@@ -61,8 +63,9 @@ export default function ProfilePage() {
       await api.patch('/users/profile/password', passwordForm);
       setPasswordForm({ currentPassword: '', newPassword: '' });
       setMessage('Password changed. Other sessions were signed out.');
+      showSuccessToast('Password changed successfully');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setSaving(false);
     }

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast } from '../../utils/toast';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
@@ -15,7 +16,7 @@ export default function UserDetailsPage() {
     api
       .get(`/admin/users/${id}`)
       .then((response) => setUser(response.data))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   }, [id]);
 
   if (error) return <ErrorState message={error} />;

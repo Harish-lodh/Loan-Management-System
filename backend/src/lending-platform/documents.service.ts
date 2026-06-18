@@ -16,6 +16,7 @@ import {
 } from '../database/entities';
 import { ConfigurationResolverService } from './configuration-resolver.service';
 import { CreateDocumentTemplateDto, PreviewTemplateDto } from './dto';
+import { assertOrganizationAccess, organizationScopedWhere, resolveOrganizationForCreate } from './organization-scope';
 import { WorkflowService } from './workflow.service';
 
 const allowedPlaceholders = [
@@ -51,6 +52,7 @@ export class DocumentsService {
 
   async createTemplate(dto: CreateDocumentTemplateDto, user: RequestUser) {
     this.ensureAdmin(user);
+    const organizationId = resolveOrganizationForCreate(user, dto.organizationId, 'document template');
     const sanitized = this.sanitizeHtml(dto.templateHtml);
     const placeholders = this.extractPlaceholders(sanitized);
     this.validatePlaceholders(placeholders, dto.allowedPlaceholders ?? allowedPlaceholders);
@@ -58,6 +60,7 @@ export class DocumentsService {
     const template = await this.templatesRepository.save(
       this.templatesRepository.create({
         ...dto,
+        organizationId,
         language: dto.language ?? 'en-IN',
         version: 1,
         status: DocumentTemplateStatus.DRAFT,
@@ -88,26 +91,32 @@ export class DocumentsService {
     return { template, version };
   }
 
-  listTemplates() {
-    return this.templatesRepository.find({ order: { createdAt: 'DESC' } });
+  listTemplates(user: RequestUser) {
+    return this.templatesRepository.find({
+      where: organizationScopedWhere(user),
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async getTemplate(id: string) {
-    const template = await this.templatesRepository.findOne({ where: { id }, relations: { versions: true } });
+  async getTemplate(id: string, user: RequestUser) {
+    const template = await this.templatesRepository.findOne({
+      where: organizationScopedWhere(user, { id }),
+      relations: { versions: true },
+    });
     if (!template) {
       throw new NotFoundException('Document template not found');
     }
     return template;
   }
 
-  async previewTemplate(id: string, dto: PreviewTemplateDto) {
-    const template = await this.getTemplate(id);
+  async previewTemplate(id: string, dto: PreviewTemplateDto, user: RequestUser) {
+    const template = await this.getTemplate(id, user);
     return { html: this.render(template.templateHtml, dto.sampleData) };
   }
 
   async publishTemplate(id: string, user: RequestUser) {
     this.ensureAdmin(user);
-    const template = await this.getTemplate(id);
+    const template = await this.getTemplate(id, user);
     template.status = DocumentTemplateStatus.PUBLISHED;
     template.updatedBy = user.id;
     const saved = await this.templatesRepository.save(template);
@@ -129,7 +138,7 @@ export class DocumentsService {
 
   async cloneTemplate(id: string, user: RequestUser) {
     this.ensureAdmin(user);
-    const template = await this.getTemplate(id);
+    const template = await this.getTemplate(id, user);
     const clone = await this.templatesRepository.save(
       this.templatesRepository.create({
         ...template,
@@ -150,6 +159,7 @@ export class DocumentsService {
     if (!application) {
       throw new NotFoundException('Loan application not found');
     }
+    assertOrganizationAccess(user, application.organizationId, 'application');
     if (application.status !== LoanApplicationStatus.AGREEMENT_PENDING) {
       throw new BadRequestException('Application is not waiting for agreement generation');
     }
@@ -232,7 +242,12 @@ export class DocumentsService {
     return { document, application };
   }
 
-  async listGeneratedDocuments(applicationId: string) {
+  async listGeneratedDocuments(applicationId: string, user: RequestUser) {
+    const application = await this.applicationsRepository.findOne({ where: { id: applicationId } });
+    if (!application) {
+      throw new NotFoundException('Loan application not found');
+    }
+    assertOrganizationAccess(user, application.organizationId, 'application');
     return this.generatedDocumentsRepository.find({
       where: { loanApplicationId: applicationId },
       order: { createdAt: 'DESC' },

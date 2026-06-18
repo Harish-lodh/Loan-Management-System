@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { RequestUser } from '../common/types/request-user.interface';
 import {
   LoanApplication,
   LoanApplicationStatus,
@@ -30,6 +31,12 @@ import {
   UpdateProductDto,
 } from './dto';
 import { moneyToString, rateToString } from './money.util';
+import {
+  assertOrganizationAccess,
+  organizationScope,
+  organizationScopedWhere,
+  resolveOrganizationForCreate,
+} from './organization-scope';
 import { RuleEngineService } from './rule-engine.service';
 
 @Injectable()
@@ -63,7 +70,7 @@ export class MasterDataService {
     private readonly ruleEngine: RuleEngineService,
   ) {}
 
-  createOrganization(dto: CreateOrganizationDto, actorUserId: string) {
+  createOrganization(dto: CreateOrganizationDto, user: RequestUser) {
     return this.auditSave(
       this.organizationsRepository,
       this.organizationsRepository.create({
@@ -72,20 +79,25 @@ export class MasterDataService {
         defaultCurrency: dto.defaultCurrency ?? 'INR',
         timeZone: dto.timeZone ?? 'Asia/Kolkata',
         status: dto.status ?? MasterStatus.ACTIVE,
-        createdBy: actorUserId,
-        updatedBy: actorUserId,
+        createdBy: user.id,
+        updatedBy: user.id,
       }),
       'ORGANIZATION_CREATED',
       'Organization',
-      actorUserId,
+      user.id,
     );
   }
 
-  listOrganizations() {
-    return this.organizationsRepository.find({ order: { createdAt: 'DESC' } });
+  listOrganizations(user: RequestUser) {
+    const scope = organizationScope(user);
+    return this.organizationsRepository.find({
+      where: scope ? { id: scope } : {},
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async getOrganization(id: string) {
+  async getOrganization(id: string, user: RequestUser) {
+    assertOrganizationAccess(user, id, 'organization');
     const organization = await this.organizationsRepository.findOne({ where: { id } });
     if (!organization) {
       throw new NotFoundException('Organization not found');
@@ -93,15 +105,17 @@ export class MasterDataService {
     return organization;
   }
 
-  async createProduct(dto: CreateProductDto, actorUserId: string) {
+  async createProduct(dto: CreateProductDto, user: RequestUser) {
     this.validateProductAmounts(dto.minimumLoanAmount, dto.maximumLoanAmount);
     this.validateRateRange(dto.minimumInterestRate, dto.maximumInterestRate, dto.defaultInterestRate);
+    const organizationId = resolveOrganizationForCreate(user, dto.organizationId, 'product');
 
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.save(
         Product,
         manager.create(Product, {
           ...dto,
+          organizationId,
           productCode: dto.productCode.toUpperCase(),
           status: dto.status ?? MasterStatus.DRAFT,
           currency: dto.currency ?? 'INR',
@@ -114,8 +128,8 @@ export class MasterDataService {
           defaultInterestRate: rateToString(dto.defaultInterestRate),
           processingFeeValue: rateToString(dto.processingFeeValue ?? 0),
           minimumIncome: dto.minimumIncome === undefined ? null : moneyToString(dto.minimumIncome),
-          createdBy: actorUserId,
-          updatedBy: actorUserId,
+          createdBy: user.id,
+          updatedBy: user.id,
         }),
       );
 
@@ -128,7 +142,7 @@ export class MasterDataService {
           effectiveFrom: product.effectiveFrom,
           effectiveTo: product.effectiveTo,
           configurationSnapshot: this.productSnapshot(product),
-          createdBy: actorUserId,
+          createdBy: user.id,
         }),
       );
 
@@ -136,7 +150,7 @@ export class MasterDataService {
         action: 'PRODUCT_CREATED',
         entityType: 'Product',
         entityId: product.id,
-        actorUserId,
+        actorUserId: user.id,
         metadata: { productCode: product.productCode, productVersionId: productVersion.id },
       });
 
@@ -144,25 +158,29 @@ export class MasterDataService {
     });
   }
 
-  async updateProduct(id: string, dto: UpdateProductDto, actorUserId: string) {
-    const product = await this.getProductEntity(id);
+  async updateProduct(id: string, dto: UpdateProductDto, user: RequestUser) {
+    const product = await this.getProductEntity(id, user);
+    if (dto.organizationId) {
+      assertOrganizationAccess(user, dto.organizationId, 'product');
+    }
     const submittedCount = await this.applicationsRepository.count({ where: { productId: id } });
     const financialKeys = ['minimumLoanAmount', 'maximumLoanAmount', 'defaultInterestRate', 'processingFeeValue'];
     if (submittedCount > 0 && financialKeys.some((key) => dto[key as keyof UpdateProductDto] !== undefined)) {
       throw new BadRequestException('Create a cloned product version before changing financial configuration already used by applications');
     }
+    const { organizationId: _organizationId, ...updates } = dto;
 
     Object.assign(product, {
-      ...dto,
-      updatedBy: actorUserId,
-      effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : product.effectiveFrom,
-      effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : product.effectiveTo,
-      minimumLoanAmount: dto.minimumLoanAmount === undefined ? product.minimumLoanAmount : moneyToString(dto.minimumLoanAmount),
-      maximumLoanAmount: dto.maximumLoanAmount === undefined ? product.maximumLoanAmount : moneyToString(dto.maximumLoanAmount),
-      minimumInterestRate: dto.minimumInterestRate === undefined ? product.minimumInterestRate : rateToString(dto.minimumInterestRate),
-      maximumInterestRate: dto.maximumInterestRate === undefined ? product.maximumInterestRate : rateToString(dto.maximumInterestRate),
-      defaultInterestRate: dto.defaultInterestRate === undefined ? product.defaultInterestRate : rateToString(dto.defaultInterestRate),
-      processingFeeValue: dto.processingFeeValue === undefined ? product.processingFeeValue : rateToString(dto.processingFeeValue),
+      ...updates,
+      updatedBy: user.id,
+      effectiveFrom: updates.effectiveFrom ? new Date(updates.effectiveFrom) : product.effectiveFrom,
+      effectiveTo: updates.effectiveTo ? new Date(updates.effectiveTo) : product.effectiveTo,
+      minimumLoanAmount: updates.minimumLoanAmount === undefined ? product.minimumLoanAmount : moneyToString(updates.minimumLoanAmount),
+      maximumLoanAmount: updates.maximumLoanAmount === undefined ? product.maximumLoanAmount : moneyToString(updates.maximumLoanAmount),
+      minimumInterestRate: updates.minimumInterestRate === undefined ? product.minimumInterestRate : rateToString(updates.minimumInterestRate),
+      maximumInterestRate: updates.maximumInterestRate === undefined ? product.maximumInterestRate : rateToString(updates.maximumInterestRate),
+      defaultInterestRate: updates.defaultInterestRate === undefined ? product.defaultInterestRate : rateToString(updates.defaultInterestRate),
+      processingFeeValue: updates.processingFeeValue === undefined ? product.processingFeeValue : rateToString(updates.processingFeeValue),
     });
 
     const saved = await this.productsRepository.save(product);
@@ -170,19 +188,22 @@ export class MasterDataService {
       action: 'PRODUCT_UPDATED',
       entityType: 'Product',
       entityId: saved.id,
-      actorUserId,
+      actorUserId: user.id,
       metadata: { fields: Object.keys(dto) },
     });
     return saved;
   }
 
-  listProducts() {
-    return this.productsRepository.find({ order: { createdAt: 'DESC' } });
+  listProducts(user: RequestUser) {
+    return this.productsRepository.find({
+      where: organizationScopedWhere(user),
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async getProduct(id: string) {
+  async getProduct(id: string, user: RequestUser) {
     const product = await this.productsRepository.findOne({
-      where: { id },
+      where: organizationScopedWhere(user, { id }),
       relations: { versions: true, applicationFields: true, eligibilityRules: true, workflowSteps: true },
     });
     if (!product) {
@@ -191,8 +212,8 @@ export class MasterDataService {
     return product;
   }
 
-  async cloneProduct(id: string, actorUserId: string) {
-    const product = await this.getProduct(id);
+  async cloneProduct(id: string, user: RequestUser) {
+    const product = await this.getProduct(id, user);
     const cloned = this.productsRepository.create({
       ...product,
       id: undefined,
@@ -200,8 +221,8 @@ export class MasterDataService {
       name: `${product.name} Clone`,
       status: MasterStatus.DRAFT,
       version: 1,
-      createdBy: actorUserId,
-      updatedBy: actorUserId,
+      createdBy: user.id,
+      updatedBy: user.id,
     });
     delete (cloned as Partial<Product>).versions;
     delete (cloned as Partial<Product>).applicationFields;
@@ -215,23 +236,23 @@ export class MasterDataService {
         version: 1,
         status: MasterStatus.DRAFT,
         configurationSnapshot: this.productSnapshot(saved),
-        createdBy: actorUserId,
+        createdBy: user.id,
       }),
     );
     await this.auditLogService.create({
       action: 'PRODUCT_CLONED',
       entityType: 'Product',
       entityId: saved.id,
-      actorUserId,
+      actorUserId: user.id,
       metadata: { sourceProductId: id, productVersionId: version.id },
     });
     return { product: saved, productVersion: version };
   }
 
-  async publishProduct(id: string, actorUserId: string) {
-    const product = await this.getProductEntity(id);
+  async publishProduct(id: string, user: RequestUser) {
+    const product = await this.getProductEntity(id, user);
     product.status = MasterStatus.PUBLISHED;
-    product.updatedBy = actorUserId;
+    product.updatedBy = user.id;
     const saved = await this.productsRepository.save(product);
     const version = await this.latestVersion(id);
     version.status = MasterStatus.PUBLISHED;
@@ -242,32 +263,34 @@ export class MasterDataService {
       action: 'PRODUCT_PUBLISHED',
       entityType: 'Product',
       entityId: id,
-      actorUserId,
+      actorUserId: user.id,
       metadata: { version: version.version },
     });
     return { product: saved, productVersion: version };
   }
 
-  async setProductStatus(id: string, status: MasterStatus, actorUserId: string) {
-    const product = await this.getProductEntity(id);
+  async setProductStatus(id: string, status: MasterStatus, user: RequestUser) {
+    const product = await this.getProductEntity(id, user);
     product.status = status;
-    product.updatedBy = actorUserId;
+    product.updatedBy = user.id;
     const saved = await this.productsRepository.save(product);
     await this.auditLogService.create({
       action: status === MasterStatus.ACTIVE ? 'PRODUCT_ACTIVATED' : 'PRODUCT_DEACTIVATED',
       entityType: 'Product',
       entityId: id,
-      actorUserId,
+      actorUserId: user.id,
       metadata: { status },
     });
     return saved;
   }
 
-  async listProductVersions(productId: string) {
+  async listProductVersions(productId: string, user: RequestUser) {
+    await this.getProductEntity(productId, user);
     return this.productVersionsRepository.find({ where: { productId }, order: { version: 'DESC' } });
   }
 
-  async addApplicationField(productId: string, dto: CreateApplicationFieldDto) {
+  async addApplicationField(productId: string, dto: CreateApplicationFieldDto, user: RequestUser) {
+    await this.getProductEntity(productId, user);
     const version = await this.latestVersion(productId);
     return this.fieldsRepository.save(
       this.fieldsRepository.create({
@@ -281,7 +304,8 @@ export class MasterDataService {
     );
   }
 
-  async addEligibilityRule(productId: string, dto: CreateEligibilityRuleDto, actorUserId: string) {
+  async addEligibilityRule(productId: string, dto: CreateEligibilityRuleDto, user: RequestUser) {
+    await this.getProductEntity(productId, user);
     this.ruleEngine.validateRuleDefinition(dto.ruleDefinition);
     const version = await this.latestVersion(productId);
     const existing = await this.rulesRepository.count({ where: { productId, ruleCode: dto.ruleCode } });
@@ -294,13 +318,14 @@ export class MasterDataService {
         version: existing + 1,
         status: MasterStatus.ACTIVE,
         score: dto.score ?? 0,
-        createdBy: actorUserId,
-        updatedBy: actorUserId,
+        createdBy: user.id,
+        updatedBy: user.id,
       }),
     );
   }
 
-  async addWorkflowStep(productId: string, dto: CreateWorkflowStepDto) {
+  async addWorkflowStep(productId: string, dto: CreateWorkflowStepDto, user: RequestUser) {
+    await this.getProductEntity(productId, user);
     const version = await this.latestVersion(productId);
     const definition = await this.getOrCreateWorkflowDefinition(productId, version.id);
     if (!Object.values(LoanApplicationStatus).includes(dto.status as LoanApplicationStatus)) {
@@ -318,8 +343,8 @@ export class MasterDataService {
     );
   }
 
-  async applicationSchema(productId: string) {
-    const product = await this.getProduct(productId);
+  async applicationSchema(productId: string, user: RequestUser) {
+    const product = await this.getProduct(productId, user);
     const version = await this.latestPublishedVersion(productId);
     const fields = await this.fieldsRepository.find({
       where: { productId, productVersionId: version.id },
@@ -332,56 +357,74 @@ export class MasterDataService {
     return { product, productVersion: version, fields, workflow };
   }
 
-  createPartner(dto: CreatePartnerDto, actorUserId: string) {
+  createPartner(dto: CreatePartnerDto, user: RequestUser) {
+    const organizationId = resolveOrganizationForCreate(user, dto.organizationId, 'partner');
     return this.auditSave(
       this.partnersRepository,
       this.partnersRepository.create({
         ...dto,
+        organizationId,
         partnerCode: dto.partnerCode.toUpperCase(),
         status: dto.status ?? MasterStatus.ACTIVE,
-        createdBy: actorUserId,
-        updatedBy: actorUserId,
+        createdBy: user.id,
+        updatedBy: user.id,
       }),
       'PARTNER_CREATED',
       'Partner',
-      actorUserId,
+      user.id,
     );
   }
 
-  listPartners() {
-    return this.partnersRepository.find({ order: { createdAt: 'DESC' } });
+  listPartners(user: RequestUser) {
+    return this.partnersRepository.find({
+      where: organizationScopedWhere(user),
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async getPartner(id: string) {
-    const partner = await this.partnersRepository.findOne({ where: { id }, relations: { productMappings: true } });
+  async getPartner(id: string, user: RequestUser) {
+    const partner = await this.partnersRepository.findOne({
+      where: organizationScopedWhere(user, { id }),
+      relations: { productMappings: true },
+    });
     if (!partner) {
       throw new NotFoundException('Partner not found');
     }
     return partner;
   }
 
-  async updatePartner(id: string, dto: UpdatePartnerDto, actorUserId: string) {
-    const partner = await this.getPartner(id);
-    Object.assign(partner, { ...dto, updatedBy: actorUserId });
+  async updatePartner(id: string, dto: UpdatePartnerDto, user: RequestUser) {
+    const partner = await this.getPartner(id, user);
+    if (dto.organizationId) {
+      assertOrganizationAccess(user, dto.organizationId, 'partner');
+    }
+    const { organizationId: _organizationId, ...updates } = dto;
+    Object.assign(partner, { ...updates, updatedBy: user.id });
     const saved = await this.partnersRepository.save(partner);
     await this.auditLogService.create({
       action: 'PARTNER_UPDATED',
       entityType: 'Partner',
       entityId: id,
-      actorUserId,
+      actorUserId: user.id,
       metadata: { fields: Object.keys(dto) },
     });
     return saved;
   }
 
-  async assignProductToPartner(partnerId: string, dto: AssignPartnerProductDto) {
-    const partner = await this.getPartner(partnerId);
-    const product = await this.getProductEntity(dto.productId);
+  async assignProductToPartner(partnerId: string, dto: AssignPartnerProductDto, user: RequestUser) {
+    const partner = await this.getPartner(partnerId, user);
+    const product = await this.getProductEntity(dto.productId, user);
+    if (partner.organizationId !== product.organizationId) {
+      throw new BadRequestException('Partner and product must belong to the same organization');
+    }
     const version = dto.productVersionId
       ? await this.productVersionsRepository.findOne({ where: { id: dto.productVersionId } })
       : await this.latestPublishedVersion(product.id);
     if (!version) {
       throw new NotFoundException('Product version not found');
+    }
+    if (version.productId !== product.id) {
+      throw new BadRequestException('Product version does not belong to the selected product');
     }
 
     const existing = await this.partnerProductsRepository.findOne({ where: { partnerId, productId: product.id } });
@@ -419,15 +462,22 @@ export class MasterDataService {
     return saved;
   }
 
-  async removePartnerProduct(partnerId: string, productId: string) {
+  async removePartnerProduct(partnerId: string, productId: string, user: RequestUser) {
+    const partner = await this.getPartner(partnerId, user);
+    const product = await this.getProductEntity(productId, user);
+    if (partner.organizationId !== product.organizationId) {
+      throw new BadRequestException('Partner and product must belong to the same organization');
+    }
     await this.partnerProductsRepository.delete({ partnerId, productId });
     return { message: 'Product removed from partner' };
   }
 
-  createServiceProvider(dto: CreateServiceProviderDto) {
+  createServiceProvider(dto: CreateServiceProviderDto, user: RequestUser) {
+    const organizationId = resolveOrganizationForCreate(user, dto.organizationId, 'service provider');
     return this.providersRepository.save(
       this.providersRepository.create({
         ...dto,
+        organizationId,
         providerCode: dto.providerCode.toUpperCase(),
         status: dto.status ?? MasterStatus.ACTIVE,
         isSandbox: dto.isSandbox ?? true,
@@ -435,8 +485,11 @@ export class MasterDataService {
     );
   }
 
-  listServiceProviders() {
-    return this.providersRepository.find({ order: { createdAt: 'DESC' } });
+  listServiceProviders(user: RequestUser) {
+    return this.providersRepository.find({
+      where: organizationScopedWhere(user),
+      order: { createdAt: 'DESC' },
+    });
   }
 
   private async latestVersion(productId: string) {
@@ -479,8 +532,8 @@ export class MasterDataService {
     );
   }
 
-  private async getProductEntity(id: string) {
-    const product = await this.productsRepository.findOne({ where: { id } });
+  private async getProductEntity(id: string, user?: RequestUser) {
+    const product = await this.productsRepository.findOne({ where: user ? organizationScopedWhere(user, { id }) : { id } });
     if (!product) {
       throw new NotFoundException('Product not found');
     }

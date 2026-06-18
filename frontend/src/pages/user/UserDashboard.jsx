@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { CalendarClock, ClipboardList, IndianRupee, WalletCards } from 'lucide-react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { EmptyState, ErrorState, LoadingState } from '../../components/AsyncState';
 import LoanCard from '../../components/LoanCard';
 import StatCard from '../../components/StatCard';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast } from '../../utils/toast';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
@@ -16,7 +17,7 @@ export default function UserDashboard() {
     api
       .get('/loans/my')
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   }, []);
 
   if (error) return <ErrorState message={error} />;

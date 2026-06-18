@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { EmptyState, ErrorState, LoadingState } from '../../components/AsyncState';
 import LoanCard from '../../components/LoanCard';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast } from '../../utils/toast';
 
 const statuses = ['', 'DRAFT', 'IN_REVIEW', 'APPROVED', 'REJECTED'];
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
@@ -18,7 +19,7 @@ export default function MyLoansPage() {
     api
       .get('/loans/my')
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   }, []);
 
   if (error) return <ErrorState message={error} />;

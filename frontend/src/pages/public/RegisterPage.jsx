@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { errorMessage } from '../../api/client';
 import Navbar from '../../components/Navbar';
 import { useAuth } from '../../context/AuthContext';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -22,9 +22,10 @@ export default function RegisterPage() {
     setError('');
     try {
       await register(form);
+      showSuccessToast('Account created successfully');
       navigate('/dashboard');
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setLoading(false);
     }

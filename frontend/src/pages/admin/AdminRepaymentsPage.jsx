@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import PaginationControls from '../../components/PaginationControls';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const statuses = ['', 'PENDING', 'PAID', 'OVERDUE'];
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
@@ -25,7 +26,7 @@ export default function AdminRepaymentsPage() {
         },
       })
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(showErrorToast(err)))
       .finally(() => setLoading(false));
   };
 
@@ -35,9 +36,10 @@ export default function AdminRepaymentsPage() {
     setError('');
     try {
       await api.patch(`/admin/repayments/${id}/status`, { status: nextStatus });
+      showSuccessToast('Repayment status updated');
       load();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     }
   }
 

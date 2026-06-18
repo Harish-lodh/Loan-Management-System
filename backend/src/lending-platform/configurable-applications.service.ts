@@ -17,6 +17,7 @@ import { assessLoanRisk, calculateEmi } from '../loans/loan-calculations';
 import { ConfigurationResolverService, ResolvedConfiguration } from './configuration-resolver.service';
 import { CreateConfigurableApplicationDto, DecisionDto, UpdateConfigurableApplicationDto } from './dto';
 import { moneyToString, percentageOf, subtractMoney } from './money.util';
+import { assertOrganizationAccess, organizationScope, organizationScopedWhere } from './organization-scope';
 import { RuleEngineService } from './rule-engine.service';
 import { WorkflowService, WorkflowStepSnapshot } from './workflow.service';
 
@@ -38,7 +39,7 @@ export class ConfigurableApplicationsService {
   ) {}
 
   async createDraft(user: RequestUser, dto: CreateConfigurableApplicationDto) {
-    const resolved = await this.resolver.resolveLive(dto.productId, dto.partnerId);
+    const resolved = await this.resolver.resolveLive(dto.productId, dto.partnerId, organizationScope(user));
     this.ensureActiveProduct(resolved);
     this.validateApplicationInput(dto, resolved);
     const applicant = this.normalizeApplicant(dto.applicant);
@@ -241,6 +242,7 @@ export class ConfigurableApplicationsService {
 
   async advanceOperationalStep(id: string, user: RequestUser, comments?: string) {
     const application = await this.getApplication(id);
+    assertOrganizationAccess(user, application.organizationId, 'application');
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException('Only operations users can complete operational workflow steps');
     }
@@ -264,6 +266,7 @@ export class ConfigurableApplicationsService {
 
   async approve(id: string, user: RequestUser, dto: DecisionDto) {
     const application = await this.getApplication(id);
+    assertOrganizationAccess(user, application.organizationId, 'application');
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException('Only admins can approve applications');
     }
@@ -285,6 +288,7 @@ export class ConfigurableApplicationsService {
 
   async reject(id: string, user: RequestUser, dto: DecisionDto) {
     const application = await this.getApplication(id);
+    assertOrganizationAccess(user, application.organizationId, 'application');
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException('Only admins can reject applications');
     }
@@ -307,8 +311,12 @@ export class ConfigurableApplicationsService {
     return this.workflowService.nextCustomerActions(application.status, resolved.workflow);
   }
 
-  async findAllForAdmin() {
-    return this.applicationsRepository.find({ order: { createdAt: 'DESC' }, relations: { user: true } });
+  async findAllForAdmin(user: RequestUser) {
+    return this.applicationsRepository.find({
+      where: organizationScopedWhere(user),
+      order: { createdAt: 'DESC' },
+      relations: { user: true },
+    });
   }
 
   async findOne(id: string, user: RequestUser) {
@@ -481,6 +489,7 @@ export class ConfigurableApplicationsService {
   }
 
   private ensureAccess(application: LoanApplication, user: RequestUser) {
+    assertOrganizationAccess(user, application.organizationId, 'application');
     if (user.role !== Role.ADMIN && application.userId !== user.id) {
       throw new ForbiddenException('You cannot access this application');
     }

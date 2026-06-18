@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import PaginationControls from '../../components/PaginationControls';
+import { showErrorToast } from '../../utils/toast';
 
 export default function UsersListPage() {
   const [data, setData] = useState({ items: [], meta: null });
@@ -21,7 +22,7 @@ export default function UsersListPage() {
         },
       })
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(showErrorToast(err)))
       .finally(() => setLoading(false));
   }, [filters]);
 

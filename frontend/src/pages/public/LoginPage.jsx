@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { errorMessage } from '../../api/client';
 import Navbar from '../../components/Navbar';
 import { useAuth } from '../../context/AuthContext';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -18,9 +18,10 @@ export default function LoginPage() {
     setError('');
     try {
       const user = await login(form.email, form.password);
+      showSuccessToast('Signed in successfully');
       navigate(location.state?.from || (user.role === 'ADMIN' ? '/admin' : '/dashboard'));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setLoading(false);
     }

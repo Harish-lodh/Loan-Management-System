@@ -53,7 +53,10 @@ async function createAuditLog(input: {
   metadata?: Record<string, unknown>;
 }) {
   const auditRepository = dataSource.getRepository(AuditLog);
-  const latest = await auditRepository.findOne({ order: { sequence: 'DESC' } });
+  const latest = await auditRepository
+    .createQueryBuilder('auditLog')
+    .orderBy('auditLog.sequence', 'DESC')
+    .getOne();
   const timestamp = new Date();
   const metadata = input.metadata ?? {};
   const previousHash = latest?.currentHash ?? null;

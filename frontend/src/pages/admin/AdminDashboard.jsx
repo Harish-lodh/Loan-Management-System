@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CheckCircle2, Clock, FileText, Users, WalletCards, XCircle } from 'lucide-react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import ChartCard from '../../components/ChartCard';
 import StatCard from '../../components/StatCard';
+import { showErrorToast } from '../../utils/toast';
 
 const colors = ['#0f766e', '#dc2626', '#b7791f', '#2563eb'];
 
@@ -15,7 +16,7 @@ export default function AdminDashboard() {
     api
       .get('/admin/dashboard')
       .then((response) => setData(response.data))
-      .catch((err) => setError(errorMessage(err)));
+      .catch((err) => setError(showErrorToast(err)));
   }, []);
 
   if (error) return <div className="panel p-6 text-sm text-rose-700">{error}</div>;

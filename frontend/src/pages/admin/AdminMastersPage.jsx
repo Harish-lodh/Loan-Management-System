@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Building2, Handshake, PackagePlus, PlugZap, RefreshCcw, Save } from 'lucide-react';
-import { api, errorMessage } from '../../api/client';
+import { api } from '../../api/client';
 import StatusBadge from '../../components/StatusBadge';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const productTypes = ['PERSONAL_LOAN', 'BUSINESS_LOAN', 'SALARY_ADVANCE', 'MERCHANT_CASH_ADVANCE', 'CONSUMER_DURABLE_LOAN'];
 const partnerTypes = ['LENDING_PARTNER', 'DSA', 'FINTECH_PLATFORM', 'MERCHANT', 'EMPLOYER'];
@@ -80,7 +81,7 @@ export default function AdminMastersPage() {
       setField((current) => ({ ...current, productId: current.productId || firstProduct }));
       setAssign((current) => ({ ...current, productId: current.productId || firstProduct, partnerId: current.partnerId || firstPartner }));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     }
   }
 
@@ -91,9 +92,10 @@ export default function AdminMastersPage() {
     try {
       await action();
       setMessage(success);
+      showSuccessToast(success);
       await refresh();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(showErrorToast(err));
     } finally {
       setLoading(false);
     }
