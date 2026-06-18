@@ -4,6 +4,7 @@ import AdminRoute from './components/AdminRoute';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppLayout from './layouts/AppLayout';
 import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminMastersPage from './pages/admin/AdminMastersPage';
 import AdminRepaymentsPage from './pages/admin/AdminRepaymentsPage';
 import AuditLogsPage from './pages/admin/AuditLogsPage';
 import LoanApplicationsPage from './pages/admin/LoanApplicationsPage';
@@ -42,6 +43,7 @@ export default function App() {
 
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/masters" element={<AdminMastersPage />} />
             <Route path="/admin/users" element={<UsersListPage />} />
             <Route path="/admin/users/:id" element={<UserDetailsPage />} />
             <Route path="/admin/applications" element={<LoanApplicationsPage />} />

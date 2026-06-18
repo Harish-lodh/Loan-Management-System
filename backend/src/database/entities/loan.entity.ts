@@ -25,11 +25,33 @@ export class Loan {
   userId: string;
 
   @Index({ unique: true })
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  loanAccountNumber?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  organizationId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  partnerId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  productId?: string | null;
+
+  @Index({ unique: true })
   @Column()
   applicationId: string;
 
   @Column({ type: 'double' })
   principal: number;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  sanctionedAmount?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  disbursedAmount?: string | null;
 
   @Column({ type: 'double' })
   annualInterestRate: number;
@@ -46,6 +68,24 @@ export class Loan {
   @Column({ type: 'double' })
   outstandingBalance: number;
 
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  principalOutstanding?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  interestOutstanding?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  feeOutstanding?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  penaltyOutstanding?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  totalOutstanding?: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  repaymentFrequency?: string | null;
+
   @Index()
   @Column({ type: 'enum', enum: LoanStatus, default: LoanStatus.APPROVED })
   status: LoanStatus;
@@ -58,6 +98,12 @@ export class Loan {
 
   @Column({ type: 'datetime', nullable: true })
   startDate?: Date | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  firstDueDate?: Date | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  maturityDate?: Date | null;
 
   @Column({ type: 'datetime', nullable: true })
   closedAt?: Date | null;

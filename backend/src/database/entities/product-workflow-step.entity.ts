@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { LoanApplicationStatus } from './enums';
+import { ProductWorkflowDefinition } from './product-workflow-definition.entity';
 import { Product } from './product.entity';
 
 @Entity('product_workflow_steps')
@@ -20,6 +21,14 @@ export class ProductWorkflowStep {
   @Index()
   @Column()
   productId: string;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  productVersionId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  workflowDefinitionId?: string | null;
 
   @Column({ length: 80 })
   stepKey: string;
@@ -48,4 +57,8 @@ export class ProductWorkflowStep {
   @ManyToOne(() => Product, (product) => product.workflowSteps, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })
   product: Product;
+
+  @ManyToOne(() => ProductWorkflowDefinition, (definition) => definition.steps, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'workflowDefinitionId' })
+  workflowDefinition?: ProductWorkflowDefinition | null;
 }

@@ -4,6 +4,7 @@ import {
   Bell,
   Calculator,
   ClipboardList,
+  Cog,
   FileText,
   Gauge,
   History,
@@ -27,6 +28,7 @@ const userLinks = [
 
 const adminLinks = [
   { to: '/admin', label: 'Dashboard', icon: BarChart3 },
+  { to: '/admin/masters', label: 'Master Data', icon: Cog },
   { to: '/admin/users', label: 'Users', icon: Users },
   { to: '/admin/applications', label: 'Applications', icon: ClipboardList },
   { to: '/admin/repayments', label: 'Repayments', icon: Receipt },

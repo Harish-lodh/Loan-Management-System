@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AuditLog, Loan, LoanApplication, Notification, Repayment, User } from './entities';
+import { DATABASE_ENTITIES } from './entities';
 
 @Module({
   imports: [
@@ -15,7 +15,7 @@ import { AuditLog, Loan, LoanApplication, Notification, Repayment, User } from '
         username: config.get<string>('DB_USERNAME') ?? 'root',
         password: config.get<string>('DB_PASSWORD') ?? '',
         database: config.get<string>('DB_DATABASE') ?? 'loan_management',
-        entities: [User, LoanApplication, Loan, Repayment, Notification, AuditLog],
+        entities: DATABASE_ENTITIES,
         synchronize: false,
         autoLoadEntities: true,
       }),

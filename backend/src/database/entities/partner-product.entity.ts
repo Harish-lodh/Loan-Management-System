@@ -26,14 +26,69 @@ export class PartnerProduct {
   @Column()
   productId: string;
 
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  productVersionId?: string | null;
+
   @Column({ type: 'enum', enum: MasterStatus, default: MasterStatus.ACTIVE })
   status: MasterStatus;
+
+  @Column({ default: true })
+  requiresKyc: boolean;
+
+  @Column({ default: false })
+  requiresBankVerification: boolean;
+
+  @Column({ default: false })
+  requiresDocumentVerification: boolean;
+
+  @Column({ default: true })
+  requiresManualApproval: boolean;
+
+  @Column({ default: false })
+  allowsAutomatedApproval: boolean;
+
+  @Column({ default: true })
+  requiresAgreement: boolean;
+
+  @Column({ default: false })
+  requiresESign: boolean;
+
+  @Column({ default: false })
+  requiresENach: boolean;
+
+  @Column({ default: false })
+  requiresDisbursementConfirmation: boolean;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  esignProviderId?: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  enachProviderId?: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  kycProviderId?: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  disbursementProviderId?: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  workflowDefinitionId?: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  effectiveFrom?: Date | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  effectiveTo?: Date | null;
 
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   minimumLoanAmount?: string | null;
 
   @Column({ type: 'decimal', precision: 15, scale: 2, nullable: true })
   maximumLoanAmount?: string | null;
+
+  @Column({ type: 'decimal', precision: 8, scale: 4, nullable: true })
+  interestRateOverride?: string | null;
 
   @Column({ type: 'json', nullable: true })
   interestOverrides?: Record<string, unknown> | null;

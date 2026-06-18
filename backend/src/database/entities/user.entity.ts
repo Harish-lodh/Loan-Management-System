@@ -51,8 +51,15 @@ export class User {
   lastLoginAt?: Date | null;
 
   @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  organizationId?: string | null;
+
+  @Index()
   @Column({ type: 'enum', enum: Role, default: Role.USER })
   role: Role;
+
+  @Column({ type: 'json', nullable: true })
+  permissions?: string[] | null;
 
   @CreateDateColumn()
   createdAt: Date;

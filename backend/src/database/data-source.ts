@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { config } from 'dotenv';
 import { DataSource } from 'typeorm';
-import { AuditLog, Loan, LoanApplication, Notification, Repayment, User } from './entities';
+import { DATABASE_ENTITIES } from './entities';
 
 config();
 
@@ -12,7 +12,7 @@ export default new DataSource({
   username: process.env.DB_USERNAME ?? 'root',
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_DATABASE ?? 'loan_management',
-  entities: [User, LoanApplication, Loan, Repayment, Notification, AuditLog],
+  entities: DATABASE_ENTITIES,
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,
   logging: false,

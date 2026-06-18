@@ -21,6 +21,10 @@ export class ProductApplicationField {
   @Column()
   productId: string;
 
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  productVersionId?: string | null;
+
   @Column({ length: 80 })
   fieldKey: string;
 

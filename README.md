@@ -2,6 +2,8 @@
 
 A portfolio-ready loan management web app for a small digital banking platform. It includes a NestJS REST API, MySQL with TypeORM migrations, JWT access and refresh tokens, role-based admin access, profile management, transparent loan scoring, EMI calculations, draft-to-review loan workflows, repayment tracking with overdue handling, notifications, admin analytics, Swagger docs, and a tamper-evident audit log.
 
+The platform now includes a configurable lending-platform foundation: organization, product, partner, provider, product-version, dynamic application field, eligibility rule, workflow, agreement template, mock eSign, mock eNACH, mock disbursement, provider webhook, application snapshot, status transition, and repayment ledger records. Legacy `/loans/*` routes remain available, while configurable APIs use `/api/v1/*`.
+
 ## Tech Stack
 
 - Backend: NestJS, TypeORM, MySQL, JWT, bcrypt, class-validator
@@ -98,6 +100,7 @@ npm --workspace frontend run preview
 - `auth`: registration, login, refresh tokens, logout, JWT strategy, password hashing, `/auth/me`
 - `users`: profile updates, password changes, and safe user serialization
 - `loans`: drafts, submission, review workflow, transparent risk scoring, EMI calculation, user loan views
+- `lending-platform`: configurable organization, partner, product, provider, workflow, dynamic application, agreement, eSign, eNACH, disbursement, webhook, and ledger foundation
 - `repayments`: repayment schedules, demo payment marking, overdue tracking, reminder metadata, status updates
 - `notifications`: in-app notifications, unread filters, priorities, related action links, mark-all-read
 - `admin`: analytics dashboards, paginated user management, loan review, repayment monitoring
@@ -156,6 +159,26 @@ Admin:
 - `GET /admin/repayments`
 - `PATCH /admin/repayments/:id/status`
 
+Configurable lending APIs:
+- `POST /api/v1/organizations`
+- `GET /api/v1/organizations`
+- `POST /api/v1/products`
+- `GET /api/v1/products`
+- `POST /api/v1/products/:id/publish`
+- `GET /api/v1/products/:id/application-schema`
+- `POST /api/v1/partners`
+- `POST /api/v1/partners/:id/products`
+- `POST /api/v1/loan-applications`
+- `POST /api/v1/loan-applications/:id/submit`
+- `POST /api/v1/loan-applications/:id/approve`
+- `POST /api/v1/loan-applications/:id/agreements/generate`
+- `POST /api/v1/loan-applications/:id/esign/initiate`
+- `POST /api/v1/loan-applications/:id/enach/initiate`
+- `POST /api/v1/loan-applications/:id/disbursements`
+- `POST /api/v1/webhooks/esign/:providerCode`
+- `POST /api/v1/webhooks/enach/:providerCode`
+- `POST /api/v1/webhooks/disbursement/:providerCode`
+
 Audit logs:
 - `GET /audit-logs`
 - `GET /audit-logs/verify`
@@ -163,10 +186,17 @@ Audit logs:
 ## Production-Style Enhancements
 
 - Access tokens are short-lived and paired with stored hashed refresh tokens for session rotation and logout.
+- Product and partner configuration is versioned and snapshotted on configurable application submission.
+- Mock provider flows require signed webhook-style completion instead of direct client completion.
 - Loan applications can be saved as drafts, submitted, moved into review, approved, or rejected with status history.
 - Loan scoring returns category-level point breakdowns, ratios, strengths, and concerns.
 - Repayments track overdue days, overdue timestamps, and reminder timestamps.
 - Admin list screens support search, filters, and pagination.
 - The frontend includes reusable loading, error, empty, pagination, score breakdown, and responsive table patterns.
 - Backend unit tests cover EMI/scoring logic, repayment overdue utilities, audit hashing, and audit chain verification.
+- Lending platform unit tests cover safe eligibility-rule execution and invalid workflow transition blocking.
+
+## Migration Note
+
+The new migration is additive. If a local database already has application tables but an empty `migrations` table, TypeORM will try to replay the initial migrations and fail with `Table 'users' already exists`. Baseline the existing migration history or migrate a fresh database before running `npm run db:migrate`.
 # Loan-Management-System

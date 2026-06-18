@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { EmploymentType, LoanApplicationStatus } from './enums';
+import { ApplicationConfigurationSnapshot } from './application-configuration-snapshot.entity';
 import { Loan } from './loan.entity';
 import { User } from './user.entity';
 
@@ -22,8 +23,50 @@ export class LoanApplication {
   @Column()
   userId: string;
 
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  applicationNumber?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  organizationId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  partnerId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  productId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  productVersionId?: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  configurationSnapshotId?: string | null;
+
   @Column({ type: 'double' })
   amount: number;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  requestedAmount?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  approvedAmount?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  sanctionedAmount?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  grossDisbursementAmount?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  upfrontDeductions?: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  netDisbursementAmount?: string | null;
 
   @Column({ type: 'int' })
   tenureMonths: number;
@@ -71,6 +114,33 @@ export class LoanApplication {
   @Column({ type: 'double' })
   totalInterest: number;
 
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  totalRepayableAmount?: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  dynamicFields?: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  pricingBreakdown?: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  productSnapshot?: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  partnerSnapshot?: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  eligibilitySnapshot?: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  workflowSnapshot?: Record<string, unknown>[] | null;
+
+  @Column({ type: 'json', nullable: true })
+  applicantSnapshot?: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  ruleEvaluationResult?: Record<string, unknown> | null;
+
   @Column({ type: 'text', nullable: true })
   adminComment?: string | null;
 
@@ -82,6 +152,9 @@ export class LoanApplication {
 
   @Column({ type: 'varchar', length: 36, nullable: true })
   reviewerId?: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  currentWorkflowStep?: string | null;
 
   @Column({ type: 'json', nullable: false })
   statusHistory: Record<string, unknown>[];
@@ -98,4 +171,7 @@ export class LoanApplication {
 
   @OneToOne(() => Loan, (loan) => loan.application)
   loan?: Loan;
+
+  @OneToOne(() => ApplicationConfigurationSnapshot, (snapshot) => snapshot.loanApplication)
+  configurationSnapshot?: ApplicationConfigurationSnapshot;
 }

@@ -5,6 +5,7 @@ import { AdminModule } from './admin/admin.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { AuthModule } from './auth/auth.module';
 import { DatabaseModule } from './database/database.module';
+import { LendingPlatformModule } from './lending-platform/lending-platform.module';
 import { LoansModule } from './loans/loans.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RepaymentsModule } from './repayments/repayments.module';
@@ -26,6 +27,7 @@ import { UsersModule } from './users/users.module';
     AuditLogModule,
     UsersModule,
     AuthModule,
+    LendingPlatformModule,
     LoansModule,
     RepaymentsModule,
     NotificationsModule,
