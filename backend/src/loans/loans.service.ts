@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { assertOrganizationAccess, organizationScope } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
   Loan,
@@ -45,23 +46,25 @@ export class LoansService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
-  async apply(userId: string, dto: ApplyLoanDto) {
-    return this.createSubmittedApplication(userId, dto);
+  async apply(user: RequestUser, dto: ApplyLoanDto) {
+    return this.createSubmittedApplication(user, dto);
   }
 
-  async saveDraft(userId: string, dto: ApplyLoanDto) {
+  async saveDraft(user: RequestUser, dto: ApplyLoanDto) {
+    const organizationId = this.requireOrganizationForLegacyLoan(user);
     const { applicationData, risk, emi } = this.buildApplicationData(dto);
     const application = await this.applicationsRepository.save(
       this.applicationsRepository.create({
-        userId,
+        userId: user.id,
+        organizationId,
         ...applicationData,
         status: LoanApplicationStatus.DRAFT,
-        statusHistory: [this.statusEntry(LoanApplicationStatus.DRAFT, userId, 'Draft saved')],
+        statusHistory: [this.statusEntry(LoanApplicationStatus.DRAFT, user.id, 'Draft saved')],
       }),
     );
 
     await this.notificationsService.create({
-      userId,
+      userId: user.id,
       title: 'Loan draft saved',
       message: 'Your loan draft was saved. Submit it when you are ready for review.',
       type: NotificationType.APPLICATION_DRAFTED,
@@ -72,8 +75,9 @@ export class LoansService {
       action: 'LOAN_APPLICATION_DRAFTED',
       entityType: 'LoanApplication',
       entityId: application.id,
-      actorUserId: userId,
+      actorUserId: user.id,
       metadata: {
+        organizationId,
         amount: application.amount,
         tenureMonths: application.tenureMonths,
         riskScore: application.riskScore,
@@ -88,7 +92,7 @@ export class LoansService {
     if (!application) {
       throw new NotFoundException('Loan application not found');
     }
-    this.ensureCanAccess(application.userId, user);
+    this.ensureCanAccess(application.userId, user, application.organizationId);
     if (application.status !== LoanApplicationStatus.DRAFT) {
       throw new BadRequestException('Only draft applications can be updated');
     }
@@ -116,7 +120,7 @@ export class LoansService {
       entityType: 'LoanApplication',
       entityId: saved.id,
       actorUserId: user.id,
-      metadata: { fields: Object.keys(dto), riskScore: saved.riskScore },
+      metadata: { organizationId: saved.organizationId ?? null, fields: Object.keys(dto), riskScore: saved.riskScore },
     });
 
     return { application: saved, risk, emi };
@@ -127,7 +131,7 @@ export class LoansService {
     if (!application) {
       throw new NotFoundException('Loan application not found');
     }
-    this.ensureCanAccess(application.userId, user);
+    this.ensureCanAccess(application.userId, user, application.organizationId);
     if (![LoanApplicationStatus.DRAFT, LoanApplicationStatus.PENDING].includes(application.status)) {
       throw new BadRequestException('Only draft applications can be submitted');
     }
@@ -149,21 +153,21 @@ export class LoansService {
     return result;
   }
 
-  async findMine(userId: string) {
+  async findMine(user: RequestUser) {
     const [applications, loans, unreadNotifications, nextRepayment] = await Promise.all([
       this.applicationsRepository.find({
-        where: { userId },
+        where: { userId: user.id },
         order: { createdAt: 'DESC' },
         relations: { loan: true },
       }),
       this.loansRepository.find({
-        where: { userId },
+        where: { userId: user.id },
         order: { createdAt: 'DESC' },
         relations: { repayments: true, application: true },
       }),
-      this.notificationsRepository.count({ where: { userId, isRead: false } }),
+      this.notificationsRepository.count({ where: { userId: user.id, isRead: false } }),
       this.repaymentsRepository.findOne({
-        where: { userId, status: In([RepaymentStatus.PENDING, RepaymentStatus.OVERDUE]) },
+        where: { userId: user.id, status: In([RepaymentStatus.PENDING, RepaymentStatus.OVERDUE]) },
         order: { dueDate: 'ASC' },
       }),
     ]);
@@ -206,7 +210,7 @@ export class LoansService {
     });
 
     if (loan) {
-      this.ensureCanAccess(loan.userId, user);
+      this.ensureCanAccess(loan.userId, user, loan.organizationId);
       loan.repayments = [...(loan.repayments ?? [])].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
       return { type: 'loan', loan };
     }
@@ -219,7 +223,7 @@ export class LoansService {
       throw new NotFoundException('Loan or application not found');
     }
 
-    this.ensureCanAccess(application.userId, user);
+    this.ensureCanAccess(application.userId, user, application.organizationId);
     if (application.loan?.repayments) {
       application.loan.repayments = application.loan.repayments.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
     }
@@ -228,7 +232,7 @@ export class LoansService {
 
   async calculateEmiForLoanOrApplication(id: string, user: RequestUser, annualInterestRate?: number) {
     const source = await this.findEmiSource(id);
-    this.ensureCanAccess(source.userId, user);
+    this.ensureCanAccess(source.userId, user, source.organizationId);
     const rate = annualInterestRate ?? source.annualInterestRate;
     const emi = calculateEmi({
       principal: source.amount,
@@ -250,11 +254,11 @@ export class LoansService {
     if (!loan) {
       throw new NotFoundException('Loan not found');
     }
-    this.ensureCanAccess(loan.userId, user);
+    this.ensureCanAccess(loan.userId, user, loan.organizationId);
     return this.repaymentsRepository.find({ where: { loanId }, order: { dueDate: 'ASC' } });
   }
 
-  async approveApplication(applicationId: string, adminUserId: string, comment?: string) {
+  async approveApplication(applicationId: string, adminUser: RequestUser, comment?: string) {
     const existing = await this.applicationsRepository.findOne({
       where: { id: applicationId },
       relations: { loan: true },
@@ -262,6 +266,7 @@ export class LoansService {
     if (!existing) {
       throw new NotFoundException('Loan application not found');
     }
+    assertOrganizationAccess(adminUser, existing.organizationId, 'loan application');
     if (existing.status === LoanApplicationStatus.REJECTED) {
       throw new BadRequestException('Rejected applications cannot be approved');
     }
@@ -284,10 +289,10 @@ export class LoansService {
       existing.status = LoanApplicationStatus.APPROVED;
       existing.adminComment = comment ?? null;
       existing.reviewedAt = new Date();
-      existing.reviewerId = adminUserId;
+      existing.reviewerId = adminUser.id;
       existing.statusHistory = this.appendStatus(
         existing.statusHistory,
-        this.statusEntry(LoanApplicationStatus.APPROVED, adminUserId, comment ?? 'Application approved'),
+        this.statusEntry(LoanApplicationStatus.APPROVED, adminUser.id, comment ?? 'Application approved'),
       );
       const application = await manager.save(LoanApplication, existing);
 
@@ -296,6 +301,9 @@ export class LoansService {
         manager.create(Loan, {
           userId: existing.userId,
           applicationId: existing.id,
+          organizationId: existing.organizationId ?? null,
+          partnerId: existing.partnerId ?? null,
+          productId: existing.productId ?? null,
           principal: existing.amount,
           annualInterestRate: existing.annualInterestRate,
           tenureMonths: existing.tenureMonths,
@@ -306,9 +314,9 @@ export class LoansService {
           disbursedAt: startDate,
           startDate,
           statusHistory: [
-            this.statusEntry(LoanStatus.APPROVED, adminUserId, 'Loan approved'),
-            this.statusEntry(LoanStatus.DISBURSED, adminUserId, 'Loan disbursed for demo flow'),
-            this.statusEntry(LoanStatus.ACTIVE, adminUserId, 'Repayment schedule is active'),
+            this.statusEntry(LoanStatus.APPROVED, adminUser.id, 'Loan approved'),
+            this.statusEntry(LoanStatus.DISBURSED, adminUser.id, 'Loan disbursed for demo flow'),
+            this.statusEntry(LoanStatus.ACTIVE, adminUser.id, 'Repayment schedule is active'),
           ],
         }),
       );
@@ -348,32 +356,33 @@ export class LoansService {
       action: 'LOAN_APPROVED',
       entityType: 'LoanApplication',
       entityId: existing.id,
-      actorUserId: adminUserId,
-      metadata: { comment: comment ?? null, riskScore: existing.riskScore },
+      actorUserId: adminUser.id,
+      metadata: { organizationId: existing.organizationId ?? null, comment: comment ?? null, riskScore: existing.riskScore },
     });
     await this.auditLogService.create({
       action: 'LOAN_DISBURSED',
       entityType: 'Loan',
       entityId: result.loan.id,
-      actorUserId: adminUserId,
-      metadata: { principal: result.loan.principal, status: result.loan.status },
+      actorUserId: adminUser.id,
+      metadata: { organizationId: result.loan.organizationId ?? null, principal: result.loan.principal, status: result.loan.status },
     });
     await this.auditLogService.create({
       action: 'STATUS_CHANGED',
       entityType: 'Loan',
       entityId: result.loan.id,
-      actorUserId: adminUserId,
-      metadata: { status: LoanStatus.ACTIVE },
+      actorUserId: adminUser.id,
+      metadata: { organizationId: result.loan.organizationId ?? null, status: LoanStatus.ACTIVE },
     });
 
     return result;
   }
 
-  async rejectApplication(applicationId: string, adminUserId: string, comment: string) {
+  async rejectApplication(applicationId: string, adminUser: RequestUser, comment: string) {
     const existing = await this.applicationsRepository.findOne({ where: { id: applicationId } });
     if (!existing) {
       throw new NotFoundException('Loan application not found');
     }
+    assertOrganizationAccess(adminUser, existing.organizationId, 'loan application');
     if (existing.status === LoanApplicationStatus.APPROVED) {
       throw new BadRequestException('Approved applications cannot be rejected');
     }
@@ -384,10 +393,10 @@ export class LoansService {
     existing.status = LoanApplicationStatus.REJECTED;
     existing.adminComment = comment;
     existing.reviewedAt = new Date();
-    existing.reviewerId = adminUserId;
+    existing.reviewerId = adminUser.id;
     existing.statusHistory = this.appendStatus(
       existing.statusHistory,
-      this.statusEntry(LoanApplicationStatus.REJECTED, adminUserId, comment),
+      this.statusEntry(LoanApplicationStatus.REJECTED, adminUser.id, comment),
     );
     const application = await this.applicationsRepository.save(existing);
 
@@ -403,28 +412,30 @@ export class LoansService {
       action: 'LOAN_REJECTED',
       entityType: 'LoanApplication',
       entityId: application.id,
-      actorUserId: adminUserId,
-      metadata: { comment, riskScore: application.riskScore },
+      actorUserId: adminUser.id,
+      metadata: { organizationId: application.organizationId ?? null, comment, riskScore: application.riskScore },
     });
     await this.auditLogService.create({
       action: 'STATUS_CHANGED',
       entityType: 'LoanApplication',
       entityId: application.id,
-      actorUserId: adminUserId,
-      metadata: { status: application.status },
+      actorUserId: adminUser.id,
+      metadata: { organizationId: application.organizationId ?? null, status: application.status },
     });
 
     return application;
   }
 
-  private async createSubmittedApplication(userId: string, dto: ApplyLoanDto) {
+  private async createSubmittedApplication(user: RequestUser, dto: ApplyLoanDto) {
+    const organizationId = this.requireOrganizationForLegacyLoan(user);
     const { applicationData } = this.buildApplicationData(dto);
     const application = await this.applicationsRepository.save(
       this.applicationsRepository.create({
-        userId,
+        userId: user.id,
+        organizationId,
         ...applicationData,
         status: LoanApplicationStatus.DRAFT,
-        statusHistory: [this.statusEntry(LoanApplicationStatus.DRAFT, userId, 'Application started')],
+        statusHistory: [this.statusEntry(LoanApplicationStatus.DRAFT, user.id, 'Application started')],
       }),
     );
 
@@ -432,17 +443,18 @@ export class LoansService {
       action: 'LOAN_APPLICATION_STARTED',
       entityType: 'LoanApplication',
       entityId: application.id,
-      actorUserId: userId,
-      metadata: { amount: application.amount, tenureMonths: application.tenureMonths },
+      actorUserId: user.id,
+      metadata: { organizationId, amount: application.amount, tenureMonths: application.tenureMonths },
     });
 
-    const result = await this.moveApplicationToReview(application, userId);
+    const result = await this.moveApplicationToReview(application, user.id);
     await this.auditLogService.create({
       action: 'LOAN_APPLICATION_SUBMITTED',
       entityType: 'LoanApplication',
       entityId: result.application.id,
-      actorUserId: userId,
+      actorUserId: user.id,
       metadata: {
+        organizationId,
         amount: result.application.amount,
         tenureMonths: result.application.tenureMonths,
         status: result.application.status,
@@ -533,6 +545,7 @@ export class LoansService {
     if (loan) {
       return {
         userId: loan.userId,
+        organizationId: loan.organizationId ?? null,
         amount: loan.principal,
         tenureMonths: loan.tenureMonths,
         annualInterestRate: loan.annualInterestRate,
@@ -546,14 +559,27 @@ export class LoansService {
 
     return {
       userId: application.userId,
+      organizationId: application.organizationId ?? null,
       amount: application.amount,
       tenureMonths: application.tenureMonths,
       annualInterestRate: application.annualInterestRate,
     };
   }
 
-  private ensureCanAccess(resourceUserId: string, user: RequestUser) {
-    if (user.role !== Role.ADMIN && resourceUserId !== user.id) {
+  private requireOrganizationForLegacyLoan(user: RequestUser) {
+    const scope = organizationScope(user);
+    if (!scope) {
+      throw new BadRequestException('Organization context is required to create a loan application');
+    }
+    return scope;
+  }
+
+  private ensureCanAccess(resourceUserId: string, user: RequestUser, organizationId?: string | null) {
+    if (user.role === Role.ADMIN) {
+      assertOrganizationAccess(user, organizationId, 'loan resource');
+      return;
+    }
+    if (resourceUserId !== user.id) {
       throw new ForbiddenException('You cannot access this resource');
     }
   }

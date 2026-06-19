@@ -14,12 +14,12 @@ export class LoansController {
 
   @Post('apply')
   apply(@CurrentUser() user: RequestUser, @Body() dto: ApplyLoanDto) {
-    return this.loansService.apply(user.id, dto);
+    return this.loansService.apply(user, dto);
   }
 
   @Post('drafts')
   saveDraft(@CurrentUser() user: RequestUser, @Body() dto: ApplyLoanDto) {
-    return this.loansService.saveDraft(user.id, dto);
+    return this.loansService.saveDraft(user, dto);
   }
 
   @Patch('applications/:id')
@@ -34,7 +34,7 @@ export class LoansController {
 
   @Get('my')
   findMine(@CurrentUser() user: RequestUser) {
-    return this.loansService.findMine(user.id);
+    return this.loansService.findMine(user);
   }
 
   @Get(':id')

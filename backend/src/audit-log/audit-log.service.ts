@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { paginationMeta } from '../common/dto/pagination-query.dto';
+import { organizationScope } from '../common/tenancy/organization-scope';
+import { RequestUser } from '../common/types/request-user.interface';
 import { AuditLog } from '../database/entities';
 import { verifyAuditChainRecords } from './audit-chain.util';
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
@@ -52,12 +54,17 @@ export class AuditLogService {
     );
   }
 
-  async findAll(query: AuditLogQueryDto = new AuditLogQueryDto()) {
+  async findAll(user: RequestUser, query: AuditLogQueryDto = new AuditLogQueryDto()) {
+    const organizationId = organizationScope(user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const builder = this.auditLogsRepository
       .createQueryBuilder('auditLog')
       .leftJoinAndSelect('auditLog.actor', 'actor');
+
+    if (organizationId) {
+      builder.andWhere('actor.organizationId = :organizationId', { organizationId });
+    }
 
     if (query.action) {
       builder.andWhere('auditLog.action = :action', { action: query.action });

@@ -18,43 +18,43 @@ export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Get('dashboard')
-  dashboard() {
-    return this.adminService.dashboard();
+  dashboard(@CurrentUser() user: RequestUser) {
+    return this.adminService.dashboard(user);
   }
 
   @Get('users')
-  users(@Query() query: AdminUsersQueryDto) {
-    return this.adminService.users(query);
+  users(@CurrentUser() user: RequestUser, @Query() query: AdminUsersQueryDto) {
+    return this.adminService.users(user, query);
   }
 
   @Get('users/:id')
-  userDetails(@Param('id') id: string) {
-    return this.adminService.userDetails(id);
+  userDetails(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.adminService.userDetails(user, id);
   }
 
   @Get('loan-applications')
-  loanApplications(@Query() query: AdminLoanApplicationsQueryDto) {
-    return this.adminService.loanApplications(query);
+  loanApplications(@CurrentUser() user: RequestUser, @Query() query: AdminLoanApplicationsQueryDto) {
+    return this.adminService.loanApplications(user, query);
   }
 
   @Get('loan-applications/:id')
-  loanApplicationDetails(@Param('id') id: string) {
-    return this.adminService.loanApplicationDetails(id);
+  loanApplicationDetails(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.adminService.loanApplicationDetails(user, id);
   }
 
   @Patch('loan-applications/:id/approve')
   approve(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: ApproveLoanDto) {
-    return this.adminService.approveLoanApplication(id, user.id, dto.comment);
+    return this.adminService.approveLoanApplication(id, user, dto.comment);
   }
 
   @Patch('loan-applications/:id/reject')
   reject(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: RejectLoanDto) {
-    return this.adminService.rejectLoanApplication(id, user.id, dto.comment);
+    return this.adminService.rejectLoanApplication(id, user, dto.comment);
   }
 
   @Get('repayments')
-  repayments(@Query() query: AdminRepaymentsQueryDto) {
-    return this.adminService.repayments(query);
+  repayments(@CurrentUser() user: RequestUser, @Query() query: AdminRepaymentsQueryDto) {
+    return this.adminService.repayments(user, query);
   }
 
   @Patch('repayments/:id/status')
@@ -63,6 +63,6 @@ export class AdminController {
     @Param('id') id: string,
     @Body() dto: UpdateRepaymentStatusDto,
   ) {
-    return this.adminService.updateRepaymentStatus(id, dto.status, user.id);
+    return this.adminService.updateRepaymentStatus(id, dto.status, user);
   }
 }

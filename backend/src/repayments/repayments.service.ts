@@ -2,6 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, LessThan, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { assertOrganizationAccess } from '../common/tenancy/organization-scope';
+import { RequestUser } from '../common/types/request-user.interface';
 import { Loan, LoanStatus, NotificationType, Repayment, RepaymentStatus } from '../database/entities';
 import { roundMoney } from '../loans/loan-calculations';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -66,7 +68,7 @@ export class RepaymentsService {
     return result;
   }
 
-  async updateStatusForAdmin(repaymentId: string, status: RepaymentStatus, adminUserId: string) {
+  async updateStatusForAdmin(repaymentId: string, status: RepaymentStatus, adminUser: RequestUser) {
     const repayment = await this.repaymentsRepository.findOne({
       where: { id: repaymentId },
       relations: { loan: true },
@@ -74,15 +76,16 @@ export class RepaymentsService {
     if (!repayment) {
       throw new NotFoundException('Repayment not found');
     }
+    assertOrganizationAccess(adminUser, repayment.loan?.organizationId, 'repayment');
 
     if (status === RepaymentStatus.PAID) {
-      const paid = await this.markRepaymentPaid(repayment, adminUserId);
+      const paid = await this.markRepaymentPaid(repayment, adminUser.id);
       await this.auditLogService.create({
         action: 'REPAYMENT_MARKED_PAID',
         entityType: 'Repayment',
         entityId: repayment.id,
-        actorUserId: adminUserId,
-        metadata: { loanId: repayment.loanId, amount: repayment.emiAmount, status },
+        actorUserId: adminUser.id,
+        metadata: { organizationId: repayment.loan?.organizationId ?? null, loanId: repayment.loanId, amount: repayment.emiAmount, status },
       });
       return paid;
     }
@@ -102,8 +105,8 @@ export class RepaymentsService {
       action: 'STATUS_CHANGED',
       entityType: 'Repayment',
       entityId: repayment.id,
-      actorUserId: adminUserId,
-      metadata: { status },
+      actorUserId: adminUser.id,
+      metadata: { organizationId: repayment.loan?.organizationId ?? null, status },
     });
 
     return saved;

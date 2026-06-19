@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 import { paginationMeta } from '../common/dto/pagination-query.dto';
+import { organizationScope } from '../common/tenancy/organization-scope';
+import { RequestUser } from '../common/types/request-user.interface';
 import {
   Loan,
   LoanApplication,
@@ -31,7 +33,8 @@ export class AdminService {
     private readonly repaymentsService: RepaymentsService,
   ) {}
 
-  async dashboard() {
+  async dashboard(user: RequestUser) {
+    const organizationId = organizationScope(user);
     await this.repaymentsService.refreshOverdueRepayments();
 
     const [
@@ -51,29 +54,29 @@ export class AdminService {
       applicationsByStatus,
       riskDistribution,
     ] = await Promise.all([
-      this.usersRepository.count(),
-      this.applicationsRepository.count(),
-      this.applicationsRepository.count({ where: { status: LoanApplicationStatus.APPROVED } }),
-      this.applicationsRepository.count({ where: { status: LoanApplicationStatus.REJECTED } }),
+      this.usersRepository.count({ where: this.organizationWhere(organizationId) }),
+      this.applicationsRepository.count({ where: this.organizationWhere(organizationId) }),
+      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.APPROVED }) }),
+      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.REJECTED }) }),
       this.applicationsRepository.count({
         where: [
-          { status: LoanApplicationStatus.DRAFT },
-          { status: LoanApplicationStatus.SUBMITTED },
-          { status: LoanApplicationStatus.IN_REVIEW },
-          { status: LoanApplicationStatus.PENDING },
-          { status: LoanApplicationStatus.AUTO_REVIEWED },
-        ],
+          LoanApplicationStatus.DRAFT,
+          LoanApplicationStatus.SUBMITTED,
+          LoanApplicationStatus.IN_REVIEW,
+          LoanApplicationStatus.PENDING,
+          LoanApplicationStatus.AUTO_REVIEWED,
+        ].map((status) => this.organizationWhere(organizationId, { status })),
       }),
-      this.loansRepository.count({ where: { status: LoanStatus.ACTIVE } }),
-      this.repaymentsRepository.count({ where: { status: RepaymentStatus.OVERDUE } }),
-      this.sumRepayments(RepaymentStatus.OVERDUE),
-      this.sumOutstandingLoans(),
-      this.sumPaidRepayments(),
-      this.averageRiskScore(),
-      this.repaymentStatusChart(),
-      this.monthlyLoanActivity(),
-      this.applicationsByStatus(),
-      this.riskDistribution(),
+      this.loansRepository.count({ where: this.organizationWhere(organizationId, { status: LoanStatus.ACTIVE }) }),
+      this.countRepayments(RepaymentStatus.OVERDUE, organizationId),
+      this.sumRepayments(RepaymentStatus.OVERDUE, organizationId),
+      this.sumOutstandingLoans(organizationId),
+      this.sumPaidRepayments(organizationId),
+      this.averageRiskScore(organizationId),
+      this.repaymentStatusChart(organizationId),
+      this.monthlyLoanActivity(organizationId),
+      this.applicationsByStatus(organizationId),
+      this.riskDistribution(organizationId),
     ]);
 
     return {
@@ -104,13 +107,18 @@ export class AdminService {
     };
   }
 
-  async users(query: AdminUsersQueryDto) {
+  async users(user: RequestUser, query: AdminUsersQueryDto) {
+    const organizationId = organizationScope(user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const builder = this.usersRepository.createQueryBuilder('user');
 
+    if (organizationId) {
+      builder.where('user.organizationId = :organizationId', { organizationId });
+    }
+
     if (query.search) {
-      builder.where('(user.name LIKE :search OR user.email LIKE :search OR user.phone LIKE :search)', {
+      builder.andWhere('(user.name LIKE :search OR user.email LIKE :search OR user.phone LIKE :search)', {
         search: `%${query.search}%`,
       });
     }
@@ -124,34 +132,40 @@ export class AdminService {
     return { items: users.map((user) => this.sanitizeUser(user)), meta: paginationMeta(total, page, limit) };
   }
 
-  async userDetails(id: string) {
-    const user = await this.usersRepository.findOne({
-      where: { id },
+  async userDetails(user: RequestUser, id: string) {
+    const organizationId = organizationScope(user);
+    const targetUser = await this.usersRepository.findOne({
+      where: this.organizationWhere(organizationId, { id }),
       relations: {
         loanApplications: true,
         loans: { repayments: true },
         repayments: true,
       },
     });
-    if (!user) {
+    if (!targetUser) {
       throw new NotFoundException('User not found');
     }
 
     return {
-      ...this.sanitizeUser(user),
-      loanApplications: user.loanApplications,
-      loans: user.loans,
-      repayments: user.repayments,
+      ...this.sanitizeUser(targetUser),
+      loanApplications: targetUser.loanApplications,
+      loans: targetUser.loans,
+      repayments: targetUser.repayments,
     };
   }
 
-  async loanApplications(query: AdminLoanApplicationsQueryDto) {
+  async loanApplications(user: RequestUser, query: AdminLoanApplicationsQueryDto) {
+    const organizationId = organizationScope(user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const builder = this.applicationsRepository
       .createQueryBuilder('application')
       .leftJoinAndSelect('application.user', 'user')
       .leftJoinAndSelect('application.loan', 'loan');
+
+    if (organizationId) {
+      builder.andWhere('application.organizationId = :organizationId', { organizationId });
+    }
 
     if (query.status) {
       builder.andWhere('application.status = :status', { status: query.status });
@@ -179,9 +193,10 @@ export class AdminService {
     };
   }
 
-  async loanApplicationDetails(id: string) {
+  async loanApplicationDetails(user: RequestUser, id: string) {
+    const organizationId = organizationScope(user);
     const application = await this.applicationsRepository.findOne({
-      where: { id },
+      where: this.organizationWhere(organizationId, { id }),
       relations: { user: true, loan: { repayments: true } },
     });
     if (!application) {
@@ -193,15 +208,16 @@ export class AdminService {
     };
   }
 
-  approveLoanApplication(id: string, adminUserId: string, comment?: string) {
-    return this.loansService.approveApplication(id, adminUserId, comment);
+  approveLoanApplication(id: string, adminUser: RequestUser, comment?: string) {
+    return this.loansService.approveApplication(id, adminUser, comment);
   }
 
-  rejectLoanApplication(id: string, adminUserId: string, comment: string) {
-    return this.loansService.rejectApplication(id, adminUserId, comment);
+  rejectLoanApplication(id: string, adminUser: RequestUser, comment: string) {
+    return this.loansService.rejectApplication(id, adminUser, comment);
   }
 
-  async repayments(query: AdminRepaymentsQueryDto) {
+  async repayments(user: RequestUser, query: AdminRepaymentsQueryDto) {
+    const organizationId = organizationScope(user);
     await this.repaymentsService.refreshOverdueRepayments();
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
@@ -209,6 +225,10 @@ export class AdminService {
       .createQueryBuilder('repayment')
       .leftJoinAndSelect('repayment.user', 'user')
       .leftJoinAndSelect('repayment.loan', 'loan');
+
+    if (organizationId) {
+      builder.andWhere('loan.organizationId = :organizationId', { organizationId });
+    }
 
     if (query.status) {
       builder.andWhere('repayment.status = :status', { status: query.status });
@@ -235,34 +255,49 @@ export class AdminService {
     };
   }
 
-  updateRepaymentStatus(id: string, status: RepaymentStatus, adminUserId: string) {
-    return this.repaymentsService.updateStatusForAdmin(id, status, adminUserId);
+  updateRepaymentStatus(id: string, status: RepaymentStatus, adminUser: RequestUser) {
+    return this.repaymentsService.updateStatusForAdmin(id, status, adminUser);
   }
 
-  private async repaymentStatusChart() {
-    const rows = await this.repaymentsRepository
+  private async countRepayments(status: RepaymentStatus, organizationId: string | null) {
+    const builder = this.repaymentsRepository
       .createQueryBuilder('repayment')
+      .leftJoin('repayment.loan', 'loan')
+      .where('repayment.status = :status', { status });
+
+    this.applyOrganizationFilter(builder, 'loan', organizationId);
+    return builder.getCount();
+  }
+
+  private async repaymentStatusChart(organizationId: string | null) {
+    const builder = this.repaymentsRepository
+      .createQueryBuilder('repayment')
+      .leftJoin('repayment.loan', 'loan')
       .select('repayment.status', 'name')
       .addSelect('COUNT(*)', 'value')
-      .groupBy('repayment.status')
-      .getRawMany<{ name: RepaymentStatus; value: string }>();
+      .groupBy('repayment.status');
+
+    this.applyOrganizationFilter(builder, 'loan', organizationId);
+    const rows = await builder.getRawMany<{ name: RepaymentStatus; value: string }>();
 
     return rows.map((row) => ({ name: row.name, value: Number(row.value) }));
   }
 
-  private async applicationsByStatus() {
-    const rows = await this.applicationsRepository
+  private async applicationsByStatus(organizationId: string | null) {
+    const builder = this.applicationsRepository
       .createQueryBuilder('application')
       .select('application.status', 'name')
       .addSelect('COUNT(*)', 'value')
-      .groupBy('application.status')
-      .getRawMany<{ name: LoanApplicationStatus; value: string }>();
+      .groupBy('application.status');
+
+    this.applyOrganizationFilter(builder, 'application', organizationId);
+    const rows = await builder.getRawMany<{ name: LoanApplicationStatus; value: string }>();
 
     return rows.map((row) => ({ name: row.name, value: Number(row.value) }));
   }
 
-  private async riskDistribution() {
-    const rows = await this.applicationsRepository
+  private async riskDistribution(organizationId: string | null) {
+    const builder = this.applicationsRepository
       .createQueryBuilder('application')
       .select(
         `CASE
@@ -273,53 +308,65 @@ export class AdminService {
         'name',
       )
       .addSelect('COUNT(*)', 'value')
-      .groupBy('name')
-      .getRawMany<{ name: string; value: string }>();
+      .groupBy('name');
+
+    this.applyOrganizationFilter(builder, 'application', organizationId);
+    const rows = await builder.getRawMany<{ name: string; value: string }>();
 
     return rows.map((row) => ({ name: row.name, value: Number(row.value) }));
   }
 
-  private async sumRepayments(status: RepaymentStatus) {
-    const row = await this.repaymentsRepository
+  private async sumRepayments(status: RepaymentStatus, organizationId: string | null) {
+    const builder = this.repaymentsRepository
       .createQueryBuilder('repayment')
+      .leftJoin('repayment.loan', 'loan')
       .select('COALESCE(SUM(repayment.emiAmount), 0)', 'total')
-      .where('repayment.status = :status', { status })
-      .getRawOne<{ total: string }>();
+      .where('repayment.status = :status', { status });
+
+    this.applyOrganizationFilter(builder, 'loan', organizationId);
+    const row = await builder.getRawOne<{ total: string }>();
 
     return Number(row?.total ?? 0);
   }
 
-  private async sumPaidRepayments() {
-    const row = await this.repaymentsRepository
+  private async sumPaidRepayments(organizationId: string | null) {
+    const builder = this.repaymentsRepository
       .createQueryBuilder('repayment')
+      .leftJoin('repayment.loan', 'loan')
       .select('COALESCE(SUM(repayment.paidAmount), 0)', 'total')
-      .where('repayment.status = :status', { status: RepaymentStatus.PAID })
-      .getRawOne<{ total: string }>();
+      .where('repayment.status = :status', { status: RepaymentStatus.PAID });
+
+    this.applyOrganizationFilter(builder, 'loan', organizationId);
+    const row = await builder.getRawOne<{ total: string }>();
 
     return Number(row?.total ?? 0);
   }
 
-  private async sumOutstandingLoans() {
-    const row = await this.loansRepository
+  private async sumOutstandingLoans(organizationId: string | null) {
+    const builder = this.loansRepository
       .createQueryBuilder('loan')
       .select('COALESCE(SUM(loan.outstandingBalance), 0)', 'total')
-      .where('loan.status IN (:...statuses)', { statuses: [LoanStatus.ACTIVE, LoanStatus.DISBURSED] })
-      .getRawOne<{ total: string }>();
+      .where('loan.status IN (:...statuses)', { statuses: [LoanStatus.ACTIVE, LoanStatus.DISBURSED] });
+
+    this.applyOrganizationFilter(builder, 'loan', organizationId);
+    const row = await builder.getRawOne<{ total: string }>();
 
     return Number(row?.total ?? 0);
   }
 
-  private async averageRiskScore() {
-    const row = await this.applicationsRepository
+  private async averageRiskScore(organizationId: string | null) {
+    const builder = this.applicationsRepository
       .createQueryBuilder('application')
-      .select('COALESCE(AVG(application.riskScore), 0)', 'average')
-      .getRawOne<{ average: string }>();
+      .select('COALESCE(AVG(application.riskScore), 0)', 'average');
+
+    this.applyOrganizationFilter(builder, 'application', organizationId);
+    const row = await builder.getRawOne<{ average: string }>();
 
     return Number(Number(row?.average ?? 0).toFixed(1));
   }
 
-  private async monthlyLoanActivity() {
-    const rows = await this.applicationsRepository
+  private async monthlyLoanActivity(organizationId: string | null) {
+    const builder = this.applicationsRepository
       .createQueryBuilder('application')
       .select("DATE_FORMAT(application.createdAt, '%Y-%m')", 'month')
       .addSelect('COUNT(*)', 'applications')
@@ -327,8 +374,10 @@ export class AdminService {
       .addSelect("SUM(CASE WHEN application.status = 'REJECTED' THEN 1 ELSE 0 END)", 'rejected')
       .groupBy('month')
       .orderBy('month', 'ASC')
-      .limit(12)
-      .getRawMany<{ month: string; applications: string; approved: string; rejected: string }>();
+      .limit(12);
+
+    this.applyOrganizationFilter(builder, 'application', organizationId);
+    const rows = await builder.getRawMany<{ month: string; applications: string; approved: string; rejected: string }>();
 
     return rows.map((row) => ({
       month: row.month,
@@ -336,6 +385,21 @@ export class AdminService {
       approved: Number(row.approved),
       rejected: Number(row.rejected),
     }));
+  }
+
+  private organizationWhere<T extends Record<string, unknown>>(organizationId: string | null, where?: T) {
+    return organizationId ? { ...(where ?? ({} as T)), organizationId } : (where ?? {});
+  }
+
+  private applyOrganizationFilter<Entity extends ObjectLiteral>(
+    builder: SelectQueryBuilder<Entity>,
+    alias: string,
+    organizationId: string | null,
+  ) {
+    if (organizationId) {
+      builder.andWhere(`${alias}.organizationId = :organizationId`, { organizationId });
+    }
+    return builder;
   }
 
   private sanitizeUser(user: User): SafeUser {
