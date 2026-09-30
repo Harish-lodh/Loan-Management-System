@@ -87,6 +87,10 @@ export class Disbursement {
   @Column({ type: 'datetime', nullable: true })
   initiatedAt?: Date | null;
 
+  // Staff member who initiated the transfer; a different person must confirm it (maker-checker).
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  initiatedBy?: string | null;
+
   @Column({ type: 'datetime', nullable: true })
   completedAt?: Date | null;
 

@@ -46,6 +46,8 @@ const initialForm = {
   interestCalculationMethod: 'REDUCING_BALANCE',
   processingFeeValue: '',
   latePaymentFee: '',
+  bounceCharge: '',
+  gracePeriodDays: '3',
   minimumAge: '',
   maximumAge: '',
   minimumIncome: '',
@@ -169,7 +171,12 @@ export default function ProductWizardPage() {
       defaultInterestRate: interestRate,
       processingFeeType: 'PERCENTAGE',
       processingFeeValue: numberValue(form.processingFeeValue) ?? 0,
-      lateFeeConfiguration: form.latePaymentFee ? { type: 'FIXED', amount: Number(form.latePaymentFee) } : undefined,
+      // Flat charges only, per RBI's penal charges rules (no penal interest added to the rate).
+      lateFeeConfiguration:
+        form.latePaymentFee || form.bounceCharge
+          ? { type: 'FIXED', amount: Number(form.latePaymentFee || 0), bounceCharge: Number(form.bounceCharge || 0) }
+          : undefined,
+      gracePeriodDays: numberValue(form.gracePeriodDays) ?? 0,
       minimumAge: numberValue(form.minimumAge),
       maximumAge: numberValue(form.maximumAge),
       minimumIncome: numberValue(form.minimumIncome),
@@ -333,8 +340,14 @@ export default function ProductWizardPage() {
               <FormField label="Processing fee">
                 <input type="number" min="0" step="0.01" value={form.processingFeeValue} onChange={(event) => update('processingFeeValue', event.target.value)} />
               </FormField>
-              <FormField label="Late payment fee">
+              <FormField label="Late payment fee (₹, flat per missed EMI)" hint="Charged once when an EMI is overdue beyond the grace period.">
                 <input type="number" min="0" step="0.01" value={form.latePaymentFee} onChange={(event) => update('latePaymentFee', event.target.value)} />
+              </FormField>
+              <FormField label="Grace period (days)">
+                <input type="number" min="0" max="30" value={form.gracePeriodDays} onChange={(event) => update('gracePeriodDays', event.target.value)} />
+              </FormField>
+              <FormField label="Bounce charge (₹, per bounced debit)">
+                <input type="number" min="0" step="0.01" value={form.bounceCharge} onChange={(event) => update('bounceCharge', event.target.value)} />
               </FormField>
             </FormSection>
           ) : null}
@@ -390,6 +403,8 @@ export default function ProductWizardPage() {
                 <ReviewItem label="Interest" value={`${form.interestRate || 0}% ${formatLabel(form.interestCalculationMethod)}`} />
                 <ReviewItem label="Processing fee" value={`${form.processingFeeValue || 0}%`} />
                 <ReviewItem label="Late fee" value={form.latePaymentFee ? formatMoney(form.latePaymentFee) : '-'} />
+                <ReviewItem label="Bounce charge" value={form.bounceCharge ? formatMoney(form.bounceCharge) : '-'} />
+                <ReviewItem label="Grace period" value={`${form.gracePeriodDays || 0} days`} />
                 <ReviewItem label="Eligibility" value={`Age ${form.minimumAge || '-'} to ${form.maximumAge || '-'}, score ${form.requiredCreditScore || '-'}`} />
                 <ReviewItem label="Documents" value={form.requiredDocuments.join(', ') || '-'} className="md:col-span-2" />
               </div>

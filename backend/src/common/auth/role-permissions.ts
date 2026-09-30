@@ -30,6 +30,7 @@ export const ALL_PERMISSIONS = [
   'disbursement.initiate',
   'repayment.view',
   'repayment.update',
+  'penalty.waive',
   'payment.collect',
   'staff.manage',
   'audit.view',

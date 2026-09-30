@@ -13,6 +13,7 @@ import {
   GeneratedDocument,
   LoanApplication,
   LoanApplicationStatus,
+  Organization,
 } from '../database/entities';
 import { ConfigurationResolverService } from './configuration-resolver.service';
 import { CreateDocumentTemplateDto, PreviewTemplateDto } from './dto';
@@ -46,6 +47,8 @@ export class DocumentsService {
     private readonly generatedDocumentsRepository: Repository<GeneratedDocument>,
     @InjectRepository(LoanApplication)
     private readonly applicationsRepository: Repository<LoanApplication>,
+    @InjectRepository(Organization)
+    private readonly organizationsRepository: Repository<Organization>,
     private readonly auditLogService: AuditLogService,
     private readonly resolver: ConfigurationResolverService,
     private readonly workflowService: WorkflowService,
@@ -175,6 +178,7 @@ export class DocumentsService {
       where: { templateId: template.id, status: DocumentTemplateStatus.PUBLISHED },
       order: { version: 'DESC' },
     });
+    const organization = await this.organizationsRepository.findOne({ where: { id: resolved.product.organizationId } });
     const html = this.render(template.templateHtml, {
       customer: {
         fullName: application.customer?.fullName ?? 'Customer',
@@ -192,7 +196,7 @@ export class DocumentsService {
         disbursementDate: '',
       },
       organization: {
-        legalName: 'Lender',
+        legalName: organization?.legalName ?? organization?.name ?? '',
       },
       partner: {
         name: resolved.partner?.name ?? '',

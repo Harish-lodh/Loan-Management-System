@@ -10,7 +10,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { LoanStatus } from './enums';
+import { AssetClassification, LoanStatus } from './enums';
 import { LoanApplication } from './loan-application.entity';
 import { MONEY_COLUMN, RATE_COLUMN } from '../transformers/decimal.transformer';
 import { Customer } from './customer.entity';
@@ -93,6 +93,21 @@ export class Loan {
 
   @Column({ type: 'json', nullable: false })
   statusHistory: Record<string, unknown>[];
+
+  // Days past due of the oldest unpaid EMI, refreshed by the nightly job and on every payment.
+  @Column({ type: 'int', default: 0 })
+  dpd: number;
+
+  @Index()
+  @Column({ type: 'enum', enum: AssetClassification, default: AssetClassification.STANDARD })
+  assetClassification: AssetClassification;
+
+  // Date the loan first became NPA; drives the substandard -> doubtful transition after 12 months.
+  @Column({ type: 'date', nullable: true })
+  npaDate?: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  classificationUpdatedAt?: Date | null;
 
   @Column({ type: 'datetime', nullable: true })
   disbursedAt?: Date | null;

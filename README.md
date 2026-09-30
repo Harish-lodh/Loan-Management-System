@@ -144,6 +144,19 @@ Configurable lending:
 
 Audit logs: `GET /audit-logs`, `GET /audit-logs/verify`
 
+## Credit Risk and Charges
+
+- **End-of-day job** (00:30 IST, and once at startup): marks overdue EMIs, applies late fees, then recomputes DPD
+  and asset classification for every running loan.
+- **Asset classification (RBI IRACP):** Standard, SMA-0 (1–30 DPD), SMA-1 (31–60), SMA-2 (61–90), NPA Substandard
+  (90+), NPA Doubtful (NPA for over 12 months). An NPA is upgraded only when all arrears are cleared. Loss is manual.
+  The dashboard shows each bucket, Gross NPA % and PAR 30.
+- **Charges (RBI penal charges directions):** flat late fee once per EMI after the product's grace period, and a
+  bounce charge each time collections record a returned debit. Configured per product
+  (`lateFeeConfiguration.amount`, `.bounceCharge`, `gracePeriodDays`). Never added to the interest rate or
+  compounded. Admins can waive charges with a reason; everything is written to the ledger and audit log.
+- **Maker-checker** applies to both loan approval and disbursement confirmation.
+
 ## Notes
 
 - Money columns are `DECIMAL`; the API still returns them as numbers.

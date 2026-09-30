@@ -66,6 +66,11 @@ export class UsersService {
   // Callers must already have checked organization scope and SUPER_ADMIN protection (see AdminService).
   async updateStaffUser(user: User, dto: UpdateStaffUserInput): Promise<SafeUser> {
     Object.assign(user, dto);
+    if (dto.isActive === false) {
+      // End the session immediately instead of letting the refresh token live for days.
+      user.refreshTokenHash = null;
+      user.refreshTokenExpiresAt = null;
+    }
     const saved = await this.usersRepository.save(user);
     return this.sanitize(saved);
   }

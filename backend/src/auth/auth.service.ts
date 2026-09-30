@@ -67,7 +67,7 @@ export class AuthService {
     }
 
     const user = await this.usersService.findByIdWithRefreshToken(payload.sub);
-    if (!user?.refreshTokenHash || !user.refreshTokenExpiresAt) {
+    if (!user?.refreshTokenHash || !user.refreshTokenExpiresAt || !user.isActive) {
       throw new UnauthorizedException('Refresh token is no longer active');
     }
 

@@ -298,6 +298,14 @@ export default function LoanReviewDetailsPage() {
 
     if (status === 'DISBURSEMENT_PENDING' && can('disbursement.initiate') && operations?.disbursement) {
       const disbursement = operations.disbursement;
+      if (disbursement.initiatedBy === user?.id) {
+        return (
+          <ActionCard
+            title="Waiting for a second approver"
+            text={`You initiated this ${formatMoney(disbursement.netAmount)} transfer, so a different Operations or Admin user must confirm it with the UTR (maker-checker).`}
+          />
+        );
+      }
       return (
         <ActionCard
           title="Confirm the bank transfer"
@@ -364,7 +372,11 @@ export default function LoanReviewDetailsPage() {
       {operations?.loan ? (
         <div className="panel flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
           <div>
-            <p className="font-semibold">Loan {operations.loan.loanAccountNumber}</p>
+            <p className="flex items-center gap-2 font-semibold">
+              Loan {operations.loan.loanAccountNumber}
+              {operations.loan.assetClassification ? <StatusBadge status={operations.loan.assetClassification} /> : null}
+              {operations.loan.dpd ? <span className="text-xs font-normal text-red-600">{operations.loan.dpd} DPD</span> : null}
+            </p>
             <p className="text-slate-500">
               Disbursed {formatDate(operations.loan.disbursedAt)} · Outstanding {formatMoney(operations.loan.outstandingBalance)} · First EMI {formatDate(operations.loan.firstDueDate)}
             </p>

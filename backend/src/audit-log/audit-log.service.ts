@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { paginationMeta } from '../common/dto/pagination-query.dto';
 import { organizationScope } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
-import { AuditLog } from '../database/entities';
+import { AuditLog, Role } from '../database/entities';
 import { verifyAuditChainRecords } from './audit-chain.util';
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
 import { calculateAuditHash } from './audit-hash.util';
@@ -24,7 +24,18 @@ export class AuditLogService {
     private readonly auditLogsRepository: Repository<AuditLog>,
   ) {}
 
-  async create(input: CreateAuditLogInput) {
+  // Each entry hashes the previous one, so two concurrent writers reading the same "latest" row would fork
+  // the chain and make verification report tampering. Writes are serialized; this relies on one backend
+  // process per tenant database (PM2 fork mode, as in deploy/), not cluster mode.
+  private writeQueue: Promise<unknown> = Promise.resolve();
+
+  create(input: CreateAuditLogInput) {
+    const write = this.writeQueue.then(() => this.append(input));
+    this.writeQueue = write.catch(() => undefined);
+    return write;
+  }
+
+  private async append(input: CreateAuditLogInput) {
     const latest = await this.auditLogsRepository.findOne({
       where: {},
       order: { sequence: 'DESC' },
@@ -63,7 +74,12 @@ export class AuditLogService {
       .leftJoinAndSelect('auditLog.actor', 'actor');
 
     if (organizationId) {
-      builder.andWhere('actor.organizationId = :organizationId', { organizationId });
+      // Include the vendor's (SUPER_ADMIN) actions so the NBFC can see every support access, plus system
+      // events tagged with this organization.
+      builder.andWhere(
+        "(actor.organizationId = :organizationId OR actor.role = :superAdmin OR JSON_UNQUOTE(JSON_EXTRACT(auditLog.metadata, '$.organizationId')) = :organizationId)",
+        { organizationId, superAdmin: Role.SUPER_ADMIN },
+      );
     }
 
     if (query.action) {

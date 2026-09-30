@@ -4,17 +4,22 @@ import { Permissions } from '../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { RequestUser } from '../common/types/request-user.interface';
+import { CreditOperationsService } from '../repayments/credit-operations.service';
 import { AdminService } from './admin.service';
 import { AdminLoanApplicationsQueryDto, AdminRepaymentsQueryDto, AdminUsersQueryDto } from './dto/admin-query.dto';
 import { ApproveLoanDto } from './dto/approve-loan.dto';
 import { RejectLoanDto } from './dto/reject-loan.dto';
+import { RepaymentActionDto } from './dto/repayment-action.dto';
 import { AssignStaffRoleDto, CreateStaffUserDto, UpdateStaffUserDto } from './dto/staff-user.dto';
 import { UpdateRepaymentStatusDto } from './dto/update-repayment-status.dto';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly creditOperations: CreditOperationsService,
+  ) {}
 
   @Get('dashboard')
   @Permissions('dashboard.view')
@@ -60,6 +65,18 @@ export class AdminController {
     @Body() dto: UpdateRepaymentStatusDto,
   ) {
     return this.adminService.updateRepaymentStatus(id, dto.status, user);
+  }
+
+  @Post('repayments/:id/bounce')
+  @Permissions('repayment.update')
+  markBounced(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: RepaymentActionDto) {
+    return this.creditOperations.markBounced(id, user, dto.reason);
+  }
+
+  @Post('repayments/:id/waive-charges')
+  @Permissions('penalty.waive')
+  waiveCharges(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: RepaymentActionDto) {
+    return this.creditOperations.waiveCharges(id, user, dto.reason);
   }
 
   @Get('staff-users')

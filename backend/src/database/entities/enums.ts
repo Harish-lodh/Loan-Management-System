@@ -261,6 +261,17 @@ export enum ChargeType {
   OTHER = 'OTHER',
 }
 
+// RBI IRACP norms for NBFCs, based on days past due (DPD).
+export enum AssetClassification {
+  STANDARD = 'STANDARD',
+  SMA_0 = 'SMA_0', // 1-30 DPD
+  SMA_1 = 'SMA_1', // 31-60 DPD
+  SMA_2 = 'SMA_2', // 61-90 DPD
+  NPA_SUBSTANDARD = 'NPA_SUBSTANDARD', // >90 DPD, NPA for up to 12 months
+  NPA_DOUBTFUL = 'NPA_DOUBTFUL', // NPA for more than 12 months
+  NPA_LOSS = 'NPA_LOSS', // identified as loss; set manually
+}
+
 export enum RepaymentStatus {
   PENDING = 'PENDING',
   PAID = 'PAID',

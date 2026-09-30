@@ -42,6 +42,19 @@ export class Repayment {
   @Column({ ...MONEY_COLUMN, default: 0 })
   paidAmount: number;
 
+  // Flat charges per RBI penal-charges rules; they never change the EMI or the interest rate.
+  @Column({ ...MONEY_COLUMN, default: 0 })
+  lateFeeAmount: number;
+
+  @Column({ ...MONEY_COLUMN, default: 0 })
+  bounceChargeAmount: number;
+
+  @Column({ type: 'int', default: 0 })
+  bounceCount: number;
+
+  @Column({ type: 'datetime', nullable: true })
+  lateFeeAppliedAt?: Date | null;
+
   @Index()
   @Column({ type: 'enum', enum: RepaymentStatus, default: RepaymentStatus.PENDING })
   status: RepaymentStatus;

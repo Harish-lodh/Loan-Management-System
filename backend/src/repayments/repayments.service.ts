@@ -4,8 +4,8 @@ import { DataSource, In, LessThan, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { assertOrganizationAccess } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
-import { Loan, LoanStatus, Repayment, RepaymentStatus } from '../database/entities';
-import { roundMoney } from '../loans/loan-calculations';
+import { Loan, Repayment, RepaymentStatus } from '../database/entities';
+import { postRepaymentPayment } from './repayment-posting';
 import { calculateDaysOverdue } from './repayment-utils';
 
 @Injectable()
@@ -105,39 +105,11 @@ export class RepaymentsService {
 
   private async markRepaymentPaid(repayment: Repayment, actorUserId: string) {
     return this.dataSource.transaction(async (manager) => {
-      repayment.status = RepaymentStatus.PAID;
-      repayment.paidAmount = repayment.emiAmount;
-      repayment.paidAt = new Date();
-      repayment.daysOverdue = 0;
-      const savedRepayment = await manager.save(Repayment, repayment);
-
-      const loan = repayment.loan ?? (await manager.findOneByOrFail(Loan, { id: repayment.loanId }));
-      loan.outstandingBalance = roundMoney(Math.max(0, Number(loan.outstandingBalance) - repayment.principalComponent));
-
-      const actualRemaining = await manager.count(Repayment, {
-        where: { loanId: repayment.loanId },
-      });
-      const paidCount = await manager.count(Repayment, {
-        where: { loanId: repayment.loanId, status: RepaymentStatus.PAID },
-      });
-
-      if (actualRemaining > 0 && paidCount === actualRemaining) {
-        loan.status = LoanStatus.CLOSED;
-        loan.closedAt = new Date();
-        loan.outstandingBalance = 0;
-        loan.statusHistory = [
-          ...(loan.statusHistory ?? []),
-          {
-            status: LoanStatus.CLOSED,
-            changedAt: new Date().toISOString(),
-            actorUserId,
-            comment: 'All repayments completed',
-          },
-        ];
-      }
-
-      await manager.save(Loan, loan);
-      return savedRepayment;
+      // Detach the loaded relation so saving the repayment does not also save a stale loan copy.
+      const { loan: _loan, ...plain } = repayment;
+      const fresh = manager.create(Repayment, plain);
+      const result = await postRepaymentPayment(manager, fresh, { actorUserId, source: 'MANUAL' });
+      return result.repayment;
     });
   }
 }

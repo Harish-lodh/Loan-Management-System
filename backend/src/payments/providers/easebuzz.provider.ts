@@ -90,8 +90,10 @@ export class EasebuzzProvider implements PaymentProviderAdapter {
     const credentials = this.resolveCredentials(provider);
     const providerReference = String(payload.txnid ?? '');
     if (!credentials) {
+      // Without keys there is nothing to verify against, so unsigned "mock" callbacks are accepted only
+      // when explicitly enabled for local/demo use. Otherwise anyone could mark an EMI as paid.
       return {
-        verified: payload.mock === true,
+        verified: payload.mock === true && process.env.ALLOW_MOCK_WEBHOOKS === 'true',
         success: String(payload.status).toUpperCase() === 'SUCCESS',
         providerReference,
         bankReference: (payload.bank_ref_num as string | undefined) ?? null,

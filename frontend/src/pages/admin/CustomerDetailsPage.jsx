@@ -178,9 +178,13 @@ export default function CustomerDetailsPage() {
                   <p className="font-medium">{formatMoney(loan.principal)}</p>
                   <p className="text-sm text-slate-500">
                     {loan.loanAccountNumber || loan.id} · Outstanding {formatMoney(loan.outstandingBalance)}
+                    {loan.dpd ? ` · ${loan.dpd} DPD` : ''}
                   </p>
                 </div>
-                <StatusBadge status={loan.status} />
+                <div className="flex gap-2">
+                  {loan.assetClassification && loan.status !== 'CLOSED' ? <StatusBadge status={loan.assetClassification} /> : null}
+                  <StatusBadge status={loan.status} />
+                </div>
               </div>
             ))
           ) : (

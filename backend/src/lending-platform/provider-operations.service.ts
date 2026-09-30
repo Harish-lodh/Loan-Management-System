@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -239,9 +239,10 @@ export class ProviderOperationsService {
         providerRequest: { idempotencyKey: idempotencyKey ?? null, mock: true },
         providerResponse: { disbursementReference, status: 'PROCESSING' },
         initiatedAt: new Date(),
+        initiatedBy: user.id,
       }),
     );
-    await this.disbursementHistory(disbursement.id, null, DisbursementStatus.PROCESSING, user.id, 'Mock disbursement initiated');
+    await this.disbursementHistory(disbursement.id, null, DisbursementStatus.PROCESSING, user.id, 'Disbursement initiated');
     await this.auditLogService.create({
       action: 'DISBURSEMENT_INITIATED',
       entityType: 'Disbursement',
@@ -274,16 +275,17 @@ export class ProviderOperationsService {
   }
 
   async handleESignWebhook(providerCode: string, payload: ProviderWebhookDto, headers: Record<string, string | string[] | undefined>) {
-    await this.verifyWebhook(providerCode, payload, headers, ProviderType.ESIGN);
     const request = await this.esignRepository.findOne({ where: { providerRequestId: payload.referenceId } });
     if (!request) {
       throw new NotFoundException('eSign request not found');
     }
-    if (request.status === ESignRequestStatus.SIGNED) {
+    const { provider, adapter } = await this.esignAdapterFor(request);
+    // Real providers are not trusted on the webhook body alone: the status is re-confirmed with their API below.
+    const { duplicate } = await this.verifyWebhook(providerCode, payload, headers, ProviderType.ESIGN, !adapter.isMock);
+    if (duplicate || request.status === ESignRequestStatus.SIGNED) {
       return { processed: false, duplicate: true, request };
     }
 
-    const { provider, adapter } = await this.esignAdapterFor(request);
     if (!adapter.isMock) {
       const confirmed = await adapter.confirmStatus(request.providerRequestId, provider);
       if (confirmed.status !== 'SIGNED') {
@@ -367,6 +369,10 @@ export class ProviderOperationsService {
     }
     if (![DisbursementStatus.INITIATED, DisbursementStatus.PROCESSING].includes(disbursement.status)) {
       throw new BadRequestException(`A ${disbursement.status.toLowerCase()} disbursement cannot be confirmed`);
+    }
+    // Money leaves the NBFC here, so the person who raised the transfer cannot also confirm it.
+    if (process.env.MAKER_CHECKER_ENABLED !== 'false' && disbursement.initiatedBy && disbursement.initiatedBy === user.id) {
+      throw new ForbiddenException('Maker-checker: the staff member who initiated this disbursement cannot confirm it');
     }
     return this.completeDisbursement(
       disbursement,
@@ -457,7 +463,10 @@ export class ProviderOperationsService {
   }
 
   async handleENachWebhook(providerCode: string, payload: ProviderWebhookDto, headers: Record<string, string | string[] | undefined>) {
-    await this.verifyWebhook(providerCode, payload, headers, ProviderType.ENACH);
+    const { duplicate } = await this.verifyWebhook(providerCode, payload, headers, ProviderType.ENACH);
+    if (duplicate) {
+      return { processed: false, duplicate: true };
+    }
     const mandate = await this.enachRepository.findOne({ where: { mandateReference: payload.referenceId } });
     if (!mandate) {
       throw new NotFoundException('eNACH mandate not found');
@@ -476,7 +485,10 @@ export class ProviderOperationsService {
   }
 
   async handleDisbursementWebhook(providerCode: string, payload: ProviderWebhookDto, headers: Record<string, string | string[] | undefined>) {
-    await this.verifyWebhook(providerCode, payload, headers, ProviderType.DISBURSEMENT);
+    const { duplicate } = await this.verifyWebhook(providerCode, payload, headers, ProviderType.DISBURSEMENT);
+    if (duplicate) {
+      return { processed: false, duplicate: true };
+    }
     const disbursement = await this.disbursementsRepository.findOne({ where: { disbursementReference: payload.referenceId } });
     if (!disbursement) {
       throw new NotFoundException('Disbursement not found');
@@ -623,14 +635,24 @@ export class ProviderOperationsService {
     });
   }
 
-  private async verifyWebhook(providerCode: string, payload: ProviderWebhookDto, headers: Record<string, string | string[] | undefined>, providerType: ProviderType) {
+  // Returns { duplicate: true } for an event id that was already processed; callers must then stop.
+  // `confirmedByProviderApi` is set when the caller re-checks the outcome with the provider's API itself.
+  private async verifyWebhook(
+    providerCode: string,
+    payload: ProviderWebhookDto,
+    headers: Record<string, string | string[] | undefined>,
+    providerType: ProviderType,
+    confirmedByProviderApi = false,
+  ) {
     const existing = await this.webhookEventsRepository.findOne({ where: { providerCode, providerEventId: payload.eventId } });
     if (existing?.processed) {
-      return existing;
+      return { duplicate: true };
     }
     const signature = headers['x-mock-signature'];
     const signatureValue = Array.isArray(signature) ? signature[0] : signature;
-    const verified = signatureValue === `mock-${providerCode}`;
+    // The mock signature is a public constant, so it is only honoured when explicitly enabled (local/demo).
+    const mockAllowed = process.env.ALLOW_MOCK_WEBHOOKS === 'true';
+    const verified = confirmedByProviderApi || (mockAllowed && signatureValue === `mock-${providerCode}`);
     const event = existing ?? this.webhookEventsRepository.create({
       organizationId: String(payload.metadata?.organizationId ?? ''),
       providerCode,
@@ -649,7 +671,8 @@ export class ProviderOperationsService {
     }
     event.processed = true;
     event.processedAt = new Date();
-    return this.webhookEventsRepository.save(event);
+    await this.webhookEventsRepository.save(event);
+    return { duplicate: false };
   }
 
   private async advanceAfterESign(loanApplicationId: string) {

@@ -79,13 +79,9 @@ export class ConfigurableApplicationsService {
         approvalLikelihood: risk.approvalLikelihood,
         riskExplanation: risk.riskExplanation,
         scoreBreakdown: risk.scoreBreakdown,
-        annualInterestRate: Number(resolved.partnerProduct?.interestRateOverride ?? resolved.product.defaultInterestRate),
-        emi: emi.monthlyEmi,
-        totalPayable: emi.totalPayable,
-        totalInterest: emi.totalInterest,
-        totalRepayableAmount: moneyToString(emi.totalPayable),
+        annualInterestRate,
+        ...derived,
         dynamicFields: dto.dynamicFields ?? {},
-        pricingBreakdown: pricing,
         currentWorkflowStep: 'draft',
         statusHistory: [this.legacyStatusEntry(LoanApplicationStatus.DRAFT, user.id, 'Configurable draft created')],
       }),
@@ -99,7 +95,7 @@ export class ConfigurableApplicationsService {
       metadata: { productId: resolved.product.id, partnerId: resolved.partner?.id ?? null, requestedAmount: application.requestedAmount },
     });
 
-    return { application, pricing, workflow: resolved.workflow };
+    return { application, pricing: derived.pricingBreakdown, workflow: resolved.workflow };
   }
 
   async updateDraft(id: string, user: RequestUser, dto: UpdateConfigurableApplicationDto) {
@@ -135,7 +131,8 @@ export class ConfigurableApplicationsService {
       creditScore: applicant.creditScore,
       purpose: applicant.purpose,
       dynamicFields: nextDto.dynamicFields,
-      pricingBreakdown: this.pricing(nextDto.requestedAmount, resolved),
+      ...this.amountDerivedFields(nextDto.requestedAmount, nextDto.tenure, application.annualInterestRate, resolved),
+      ...this.riskFields(assessLoanRisk({ amount: nextDto.requestedAmount, tenureMonths: nextDto.tenure, ...applicant })),
     });
     const saved = await this.applicationsRepository.save(application);
     await this.auditLogService.create({
@@ -272,6 +269,8 @@ export class ConfigurableApplicationsService {
     if (application.status !== LoanApplicationStatus.CREDIT_APPROVED) {
       return application;
     }
+    application.approvedAmount = application.approvedAmount ?? moneyToString(Number(application.requestedAmount ?? application.amount));
+    application.sanctionedAmount = application.sanctionedAmount ?? application.approvedAmount;
     const next = this.workflowService.statusAfterCreditApproval(workflow);
     return this.move(application, next, 'auto_approval', null, 'Approved automatically by product rules', workflow);
   }
@@ -421,6 +420,31 @@ export class ConfigurableApplicationsService {
     if (missing.length) {
       throw new BadRequestException(`Missing required fields: ${missing.join(', ')}`);
     }
+  }
+
+  // Every field that depends on the loan amount, kept together so draft, edit and approval stay consistent.
+  private amountDerivedFields(amount: number, tenureMonths: number, annualInterestRate: number, resolved: ResolvedConfiguration) {
+    const pricing = this.pricing(amount, resolved);
+    const emi = calculateEmi({ principal: amount, annualInterestRate: Number(annualInterestRate), tenureMonths });
+    return {
+      pricingBreakdown: pricing,
+      upfrontDeductions: pricing.totalUpfrontDeductions,
+      grossDisbursementAmount: pricing.grossDisbursementAmount,
+      netDisbursementAmount: pricing.netDisbursementAmount,
+      emi: emi.monthlyEmi,
+      totalPayable: emi.totalPayable,
+      totalInterest: emi.totalInterest,
+      totalRepayableAmount: moneyToString(emi.totalPayable),
+    };
+  }
+
+  private riskFields(risk: ReturnType<typeof assessLoanRisk>) {
+    return {
+      riskScore: risk.riskScore,
+      approvalLikelihood: risk.approvalLikelihood,
+      riskExplanation: risk.riskExplanation,
+      scoreBreakdown: risk.scoreBreakdown,
+    };
   }
 
   private pricing(requestedAmount: number, resolved: ResolvedConfiguration) {

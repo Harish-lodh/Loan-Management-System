@@ -109,6 +109,7 @@ async function upsertProduct(
     processingFeeType: FeeType.PERCENTAGE,
     processingFeeValue: rateToString(data.processingFeeValue),
     gracePeriodDays: 3,
+    lateFeeConfiguration: { type: 'FIXED', amount: 500, bounceCharge: 590 },
     minimumAge: 21,
     maximumAge: 65,
     minimumIncome: moneyToString(25000),

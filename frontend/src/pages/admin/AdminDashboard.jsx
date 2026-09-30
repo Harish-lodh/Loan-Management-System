@@ -42,6 +42,7 @@ export default function AdminDashboard() {
         <StatCard title="Collected" value={money(summary.collectedAmount)} icon={CheckCircle2} />
         <StatCard title="Average risk" value={`${summary.averageRiskScore}/100`} icon={FileText} />
       </div>
+      {data.assetQuality ? <AssetQuality quality={data.assetQuality} /> : null}
       <div className="grid gap-4 xl:grid-cols-2">
         <ChartCard title="Approvals vs rejections">
           <ResponsiveContainer width="100%" height="100%">
@@ -118,6 +119,77 @@ export default function AdminDashboard() {
         </ChartCard>
       </div>
     </div>
+  );
+}
+
+const BUCKET_LABELS = {
+  STANDARD: ['Standard', '0 DPD'],
+  SMA_0: ['SMA-0', '1–30 DPD'],
+  SMA_1: ['SMA-1', '31–60 DPD'],
+  SMA_2: ['SMA-2', '61–90 DPD'],
+  NPA_SUBSTANDARD: ['NPA – Substandard', '90+ DPD, ≤ 12 months'],
+  NPA_DOUBTFUL: ['NPA – Doubtful', 'NPA > 12 months'],
+  NPA_LOSS: ['NPA – Loss', 'Identified loss'],
+};
+
+// Portfolio quality by RBI IRACP bucket, refreshed by the nightly end-of-day job.
+function AssetQuality({ quality }) {
+  return (
+    <section className="panel p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-slate-950">Portfolio quality (RBI IRACP)</h2>
+          <p className="mt-1 text-sm text-slate-500">Running loans by days past due. Updated every night at 00:30 IST and on each payment.</p>
+        </div>
+        <div className="flex gap-6 text-sm">
+          <div>
+            <p className="text-slate-500">Gross NPA</p>
+            <p className={`text-xl font-semibold ${quality.grossNpaPercent > 0 ? 'text-red-600' : 'text-slate-950'}`}>{quality.grossNpaPercent}%</p>
+          </div>
+          <div>
+            <p className="text-slate-500">PAR 30</p>
+            <p className={`text-xl font-semibold ${quality.par30Percent > 0 ? 'text-amber-600' : 'text-slate-950'}`}>{quality.par30Percent}%</p>
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="text-left text-xs uppercase text-slate-500">
+            <tr>
+              <th className="py-2 pr-4">Classification</th>
+              <th className="py-2 pr-4">Loans</th>
+              <th className="py-2 pr-4">Outstanding</th>
+              <th className="py-2">Share</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {quality.buckets.map((bucket) => {
+              const [label, range] = BUCKET_LABELS[bucket.classification] ?? [bucket.classification, ''];
+              const share = quality.totalOutstanding ? (bucket.outstanding / quality.totalOutstanding) * 100 : 0;
+              const npa = bucket.classification.startsWith('NPA_');
+              return (
+                <tr key={bucket.classification}>
+                  <td className="py-2 pr-4">
+                    <span className={`font-medium ${npa && bucket.loans ? 'text-red-700' : ''}`}>{label}</span>
+                    <span className="ml-2 text-xs text-slate-500">{range}</span>
+                  </td>
+                  <td className="py-2 pr-4">{bucket.loans}</td>
+                  <td className="py-2 pr-4">{money(bucket.outstanding)}</td>
+                  <td className="py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-24 overflow-hidden rounded bg-slate-100">
+                        <div className={`h-full ${npa ? 'bg-red-500' : bucket.classification === 'STANDARD' ? 'bg-teal-600' : 'bg-amber-500'}`} style={{ width: `${share}%` }} />
+                      </div>
+                      <span className="text-xs text-slate-500">{share.toFixed(1)}%</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

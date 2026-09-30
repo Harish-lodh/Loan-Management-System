@@ -36,6 +36,7 @@ export class LoansService {
     }
     assertOrganizationAccess(staffUser, existing.organizationId, 'loan application');
     assertPermission(staffUser, 'application.approve');
+    this.assertNotConfigurable(existing);
     this.assertMakerChecker(existing, staffUser);
     if (existing.status === LoanApplicationStatus.REJECTED) {
       throw new BadRequestException('Rejected applications cannot be approved');
@@ -131,6 +132,7 @@ export class LoansService {
     }
     assertOrganizationAccess(staffUser, existing.organizationId, 'loan application');
     assertPermission(staffUser, 'application.reject');
+    this.assertNotConfigurable(existing);
     if (existing.status === LoanApplicationStatus.APPROVED) {
       throw new BadRequestException('Approved applications cannot be rejected');
     }
@@ -154,6 +156,14 @@ export class LoansService {
     });
 
     return application;
+  }
+
+  // Product-based applications must go through their workflow (agreement, eSign, eNACH, disbursement);
+  // this shortcut would book the loan directly and skip all of it.
+  private assertNotConfigurable(application: LoanApplication) {
+    if (application.productId) {
+      throw new BadRequestException('This application follows a product workflow; use /api/v1/loan-applications/:id/approve or /reject');
+    }
   }
 
   private assertMakerChecker(application: LoanApplication, user: RequestUser) {

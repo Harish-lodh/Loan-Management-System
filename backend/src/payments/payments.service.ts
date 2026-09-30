@@ -7,7 +7,6 @@ import { RequestUser } from '../common/types/request-user.interface';
 import {
   Customer,
   Loan,
-  LoanStatus,
   MasterStatus,
   NotificationType,
   PaymentCollectionRequest,
@@ -15,13 +14,12 @@ import {
   PaymentCollectionStatusHistory,
   ProviderType,
   Repayment,
-  RepaymentLedgerEntry,
-  RepaymentLedgerTransactionType,
   RepaymentStatus,
   ServiceProvider,
 } from '../database/entities';
-import { roundMoney } from '../loans/loan-calculations';
+import { toCents } from '../lending-platform/money.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { amountDue, postRepaymentPayment } from '../repayments/repayment-posting';
 import { EasebuzzProvider } from './providers/easebuzz.provider';
 
 @Injectable()
@@ -60,8 +58,15 @@ export class PaymentsService {
       where: { repaymentId, status: PaymentCollectionStatus.LINK_CREATED },
       order: { createdAt: 'DESC' },
     });
+    const amount = amountDue(repayment);
     if (existing) {
-      return existing;
+      if (toCents(existing.amount) === toCents(amount)) {
+        return existing;
+      }
+      // Charges were added after this link was sent; paying the old amount must not settle the EMI.
+      existing.status = PaymentCollectionStatus.CANCELLED;
+      await this.requestsRepository.save(existing);
+      await this.history(existing.id, PaymentCollectionStatus.LINK_CREATED, PaymentCollectionStatus.CANCELLED, user.id, 'Amount due changed');
     }
 
     const customer = await this.customersRepository.findOne({ where: { id: repayment.customerId } });
@@ -70,7 +75,6 @@ export class PaymentsService {
     }
     const provider = await this.resolveProvider(repayment.loan.organizationId ?? null);
     const referenceId = `PAY-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const amount = roundMoney(repayment.emiAmount - repayment.paidAmount);
 
     const link = await this.easebuzzProvider.createPaymentLink(
       {
@@ -140,6 +144,10 @@ export class PaymentsService {
     if (!result.verified) {
       throw new BadRequestException('INVALID_WEBHOOK_SIGNATURE');
     }
+    // A valid signature proves who sent it, not that the right amount was paid.
+    if (result.success && payload.amount !== undefined && toCents(String(payload.amount)) !== toCents(request.amount)) {
+      throw new BadRequestException('PAYMENT_AMOUNT_MISMATCH');
+    }
 
     if (!result.success) {
       const previous = request.status;
@@ -151,7 +159,46 @@ export class PaymentsService {
       return { processed: true, request: saved };
     }
 
+    if (request.status === PaymentCollectionStatus.CANCELLED) {
+      return this.recordPaymentOnCancelledLink(request, providerCode, payload, result.bankReference ?? null);
+    }
+
     return this.completeCollection(request, providerCode, payload, result.bankReference ?? null);
+  }
+
+  // Money arrived on a link that was replaced because charges were added. It no longer covers the full amount
+  // due, so the EMI is not settled automatically; the payment is recorded and staff are asked to reconcile.
+  private async recordPaymentOnCancelledLink(
+    request: PaymentCollectionRequest,
+    providerCode: string,
+    payload: Record<string, unknown>,
+    bankReference: string | null,
+  ) {
+    request.status = PaymentCollectionStatus.SUCCESS;
+    request.providerStatus = 'PAID_ON_CANCELLED_LINK';
+    request.completedAt = new Date();
+    request.bankReference = bankReference;
+    request.providerResponse = payload;
+    const saved = await this.requestsRepository.save(request);
+    await this.history(saved.id, PaymentCollectionStatus.CANCELLED, PaymentCollectionStatus.SUCCESS, null, 'Paid on a cancelled link; reconcile manually');
+    if (saved.createdBy) {
+      await this.notificationsService.create({
+        userId: saved.createdBy,
+        title: 'Payment needs reconciliation',
+        message: `₹${saved.amount} was received via ${providerCode} on an outdated payment link. Record it against the EMI manually.`,
+        type: NotificationType.REPAYMENT_RECEIVED,
+        priority: 'HIGH',
+        actionUrl: '/admin/repayments',
+      });
+    }
+    await this.auditLogService.create({
+      action: 'PAYMENT_RECONCILIATION_REQUIRED',
+      entityType: 'PaymentCollectionRequest',
+      entityId: saved.id,
+      actorUserId: null,
+      metadata: { providerCode, repaymentId: saved.repaymentId, amount: saved.amount, organizationId: saved.organizationId },
+    });
+    return { processed: true, reconciliationRequired: true, request: saved };
   }
 
   private async completeCollection(
@@ -189,39 +236,13 @@ export class PaymentsService {
         }),
       );
 
-      repayment.status = RepaymentStatus.PAID;
-      repayment.paidAmount = repayment.emiAmount;
-      repayment.paidAt = new Date();
-      repayment.daysOverdue = 0;
-      const savedRepayment = await manager.save(Repayment, repayment);
-
-      const loan = await manager.findOneByOrFail(Loan, { id: repayment.loanId });
-      loan.outstandingBalance = roundMoney(Math.max(0, Number(loan.outstandingBalance) - repayment.principalComponent));
-      const totalRepayments = await manager.count(Repayment, { where: { loanId: repayment.loanId } });
-      const paidRepayments = await manager.count(Repayment, { where: { loanId: repayment.loanId, status: RepaymentStatus.PAID } });
-      if (totalRepayments > 0 && paidRepayments === totalRepayments) {
-        loan.status = LoanStatus.CLOSED;
-        loan.closedAt = new Date();
-        loan.outstandingBalance = 0;
-      }
-      await manager.save(Loan, loan);
-
-      await manager.save(
-        RepaymentLedgerEntry,
-        manager.create(RepaymentLedgerEntry, {
-          organizationId: loan.organizationId ?? '',
-          loanId: loan.id,
-          repaymentId: repayment.id,
-          transactionType: RepaymentLedgerTransactionType.PAYMENT_RECEIVED,
-          principalAmount: repayment.principalComponent.toFixed(2),
-          interestAmount: repayment.interestComponent.toFixed(2),
-          feeAmount: '0.00',
-          penaltyAmount: '0.00',
-          totalAmount: savedRequest.amount,
-          providerReference: savedRequest.providerRequestId,
-          externalReference: bankReference,
-        }),
-      );
+      const { repayment: savedRepayment, loan } = await postRepaymentPayment(manager, repayment, {
+        actorUserId: null,
+        source: providerCode,
+        amount: savedRequest.amount,
+        providerReference: savedRequest.providerRequestId,
+        externalReference: bankReference,
+      });
 
       // Tell the staff member who sent the payment link that the EMI has been collected.
       if (savedRequest.createdBy) {

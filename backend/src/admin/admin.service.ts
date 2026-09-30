@@ -1,12 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
+import { In, ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ASSIGNABLE_STAFF_ROLES, isSuperAdmin } from '../common/auth/role-permissions';
 import { paginationMeta } from '../common/dto/pagination-query.dto';
 import { organizationScope } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
+  AssetClassification,
   Customer,
   Loan,
   LoanApplication,
@@ -23,6 +24,38 @@ import { RepaymentsService } from '../repayments/repayments.service';
 import { SafeUser, UsersService } from '../users/users.service';
 import { AdminLoanApplicationsQueryDto, AdminRepaymentsQueryDto, AdminUsersQueryDto } from './dto/admin-query.dto';
 import { AssignStaffRoleDto, CreateStaffUserDto, UpdateStaffUserDto } from './dto/staff-user.dto';
+
+// Status groups spanning both the simple (APPROVED/REJECTED) and configurable workflow statuses.
+const APPROVED_STATUSES = [
+  LoanApplicationStatus.APPROVED,
+  LoanApplicationStatus.CREDIT_APPROVED,
+  LoanApplicationStatus.AGREEMENT_PENDING,
+  LoanApplicationStatus.AGREEMENT_GENERATED,
+  LoanApplicationStatus.ESIGN_PENDING,
+  LoanApplicationStatus.ESIGN_COMPLETED,
+  LoanApplicationStatus.ENACH_PENDING,
+  LoanApplicationStatus.ENACH_REGISTERED,
+  LoanApplicationStatus.READY_FOR_DISBURSEMENT,
+  LoanApplicationStatus.DISBURSEMENT_PENDING,
+  LoanApplicationStatus.DISBURSED,
+  LoanApplicationStatus.ACTIVE,
+  LoanApplicationStatus.CLOSED,
+];
+const REJECTED_STATUSES = [LoanApplicationStatus.REJECTED, LoanApplicationStatus.CREDIT_REJECTED];
+const PENDING_DECISION_STATUSES = [
+  LoanApplicationStatus.DRAFT,
+  LoanApplicationStatus.SUBMITTED,
+  LoanApplicationStatus.IN_REVIEW,
+  LoanApplicationStatus.PENDING,
+  LoanApplicationStatus.AUTO_REVIEWED,
+  LoanApplicationStatus.KYC_PENDING,
+  LoanApplicationStatus.KYC_IN_PROGRESS,
+  LoanApplicationStatus.KYC_COMPLETED,
+  LoanApplicationStatus.DOCUMENT_PENDING,
+  LoanApplicationStatus.DOCUMENT_VERIFICATION,
+  LoanApplicationStatus.BANK_VERIFICATION_PENDING,
+  LoanApplicationStatus.UNDER_REVIEW,
+];
 
 @Injectable()
 export class AdminService {
@@ -66,17 +99,9 @@ export class AdminService {
     ] = await Promise.all([
       this.customersRepository.count({ where: this.organizationWhere(organizationId) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId) }),
-      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.APPROVED }) }),
-      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.REJECTED }) }),
-      this.applicationsRepository.count({
-        where: [
-          LoanApplicationStatus.DRAFT,
-          LoanApplicationStatus.SUBMITTED,
-          LoanApplicationStatus.IN_REVIEW,
-          LoanApplicationStatus.PENDING,
-          LoanApplicationStatus.AUTO_REVIEWED,
-        ].map((status) => this.organizationWhere(organizationId, { status })),
-      }),
+      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: In(APPROVED_STATUSES) }) }),
+      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: In(REJECTED_STATUSES) }) }),
+      this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: In(PENDING_DECISION_STATUSES) }) }),
       this.loansRepository.count({ where: this.organizationWhere(organizationId, { status: LoanStatus.ACTIVE }) }),
       this.countRepayments(RepaymentStatus.OVERDUE, organizationId),
       this.sumRepayments(RepaymentStatus.OVERDUE, organizationId),
@@ -88,6 +113,7 @@ export class AdminService {
       this.applicationsByStatus(organizationId),
       this.riskDistribution(organizationId),
     ]);
+    const assetQuality = await this.assetQuality(organizationId);
 
     return {
       summary: {
@@ -103,6 +129,7 @@ export class AdminService {
         collectedAmount,
         averageRiskScore,
       },
+      assetQuality,
       charts: {
         approvalsVsRejections: [
           { name: 'Approved', value: approvedLoans },
@@ -323,8 +350,9 @@ export class AdminService {
       .createQueryBuilder('application')
       .select("DATE_FORMAT(application.createdAt, '%Y-%m')", 'month')
       .addSelect('COUNT(*)', 'applications')
-      .addSelect("SUM(CASE WHEN application.status = 'APPROVED' THEN 1 ELSE 0 END)", 'approved')
-      .addSelect("SUM(CASE WHEN application.status = 'REJECTED' THEN 1 ELSE 0 END)", 'rejected')
+      .addSelect('SUM(CASE WHEN application.status IN (:...approvedStatuses) THEN 1 ELSE 0 END)', 'approved')
+      .addSelect('SUM(CASE WHEN application.status IN (:...rejectedStatuses) THEN 1 ELSE 0 END)', 'rejected')
+      .setParameters({ approvedStatuses: APPROVED_STATUSES, rejectedStatuses: REJECTED_STATUSES })
       .groupBy('month')
       .orderBy('month', 'ASC')
       .limit(12);
@@ -338,6 +366,37 @@ export class AdminService {
       approved: Number(row.approved),
       rejected: Number(row.rejected),
     }));
+  }
+
+  // Portfolio quality by RBI IRACP bucket, plus Gross NPA % and PAR 30 (share of outstanding more than 30 DPD).
+  private async assetQuality(organizationId: string | null) {
+    const builder = this.loansRepository
+      .createQueryBuilder('loan')
+      .select('loan.assetClassification', 'classification')
+      .addSelect('COUNT(*)', 'loans')
+      .addSelect('COALESCE(SUM(loan.outstandingBalance), 0)', 'outstanding')
+      .addSelect('COALESCE(SUM(CASE WHEN loan.dpd > 30 THEN loan.outstandingBalance ELSE 0 END), 0)', 'overThirty')
+      .where('loan.status IN (:...statuses)', { statuses: [LoanStatus.ACTIVE, LoanStatus.DISBURSED, LoanStatus.DEFAULTED] })
+      .groupBy('loan.assetClassification');
+    this.applyOrganizationFilter(builder, 'loan', organizationId);
+    const rows = await builder.getRawMany<{ classification: AssetClassification; loans: string; outstanding: string; overThirty: string }>();
+
+    const buckets = Object.values(AssetClassification).map((classification) => {
+      const row = rows.find((item) => item.classification === classification);
+      return { classification, loans: Number(row?.loans ?? 0), outstanding: Number(row?.outstanding ?? 0) };
+    });
+    const totalOutstanding = buckets.reduce((sum, bucket) => sum + bucket.outstanding, 0);
+    const npaOutstanding = buckets.filter((bucket) => bucket.classification.startsWith('NPA_')).reduce((sum, bucket) => sum + bucket.outstanding, 0);
+    const overThirty = rows.reduce((sum, row) => sum + Number(row.overThirty), 0);
+    const ratio = (part: number) => (totalOutstanding ? Number(((part / totalOutstanding) * 100).toFixed(2)) : 0);
+
+    return {
+      buckets,
+      totalOutstanding,
+      npaOutstanding,
+      grossNpaPercent: ratio(npaOutstanding),
+      par30Percent: ratio(overThirty),
+    };
   }
 
   private organizationWhere<T extends Record<string, unknown>>(organizationId: string | null, where?: T) {
