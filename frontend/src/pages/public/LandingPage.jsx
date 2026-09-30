@@ -11,18 +11,16 @@ export default function LandingPage() {
         <section className="border-b border-slate-200 bg-paper">
           <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 lg:grid-cols-[1fr_0.9fr] lg:px-6">
             <div className="flex flex-col justify-center">
-              <p className="text-sm font-semibold uppercase tracking-wide text-bank">Digital loan operations</p>
+              <p className="text-sm font-semibold uppercase tracking-wide text-bank">Internal lending operations</p>
               <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-950 sm:text-5xl">LedgerLine Loans</h1>
               <p className="mt-5 max-w-2xl text-lg text-slate-600">
-                A complete loan origination, repayment, notification, and audit dashboard for small banking teams.
+                Origination, underwriting, eSign, disbursement, and repayment collection for NBFC lending and partner/fintech
+                programs. Internal staff and partner-integration use only.
               </p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <Link to="/register" className="btn-primary">
-                  Apply now
-                  <ArrowRight size={18} />
-                </Link>
-                <Link to="/login" className="btn-secondary">
+                <Link to="/login" className="btn-primary">
                   Staff login
+                  <ArrowRight size={18} />
                 </Link>
               </div>
             </div>

@@ -24,9 +24,12 @@ import {
   RepaymentLedgerEntry,
   RepaymentLedgerTransactionType,
   ServiceProvider,
+  User,
 } from '../database/entities';
 import { generateRepaymentSchedule } from '../loans/loan-calculations';
 import { ConfigurationResolverService } from './configuration-resolver.service';
+import { DocumentsService } from './documents.service';
+import { ESignProviderRegistry } from './esign-providers/esign-provider.registry';
 import { moneyToString } from './money.util';
 import { ProviderWebhookDto } from './dto';
 import { assertOrganizationAccess } from './organization-scope';
@@ -60,10 +63,14 @@ export class ProviderOperationsService {
     private readonly repaymentsRepository: Repository<Repayment>,
     @InjectRepository(RepaymentLedgerEntry)
     private readonly ledgerRepository: Repository<RepaymentLedgerEntry>,
+    @InjectRepository(User)
+    private readonly usersRepository: Repository<User>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly resolver: ConfigurationResolverService,
     private readonly auditLogService: AuditLogService,
+    private readonly documentsService: DocumentsService,
+    private readonly esignProviders: ESignProviderRegistry,
   ) {}
 
   async initiateESign(applicationId: string, user: RequestUser, idempotencyKey?: string) {
@@ -86,6 +93,21 @@ export class ProviderOperationsService {
     const resolved = await this.resolver.resolveForApplication(application);
     const provider = await this.provider(resolved.product.organizationId, ProviderType.ESIGN, resolved.partnerProduct?.esignProviderId ?? null);
     const referenceId = `ESIGN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const adapter = this.esignProviders.resolve(provider?.providerCode);
+    const customer = await this.usersRepository.findOneOrFail({ where: { id: application.userId } });
+    const documentPdfBase64 = adapter.isMock ? '' : await this.documentsService.renderToPdfBase64(agreement.id, user);
+    const signingRequest = await adapter.createSigningRequest(
+      {
+        referenceId,
+        documentPdfBase64,
+        fileName: agreement.fileName,
+        signerName: customer.name,
+        signerEmail: customer.email,
+        signerPhone: customer.phone,
+      },
+      provider,
+    );
+
     const request = await this.esignRepository.save(
       this.esignRepository.create({
         organizationId: resolved.product.organizationId,
@@ -95,13 +117,13 @@ export class ProviderOperationsService {
         productId: application.productId,
         providerId: provider?.id ?? null,
         agreementDocumentId: agreement.id,
-        providerRequestId: referenceId,
-        signingUrl: `https://mock-provider.local/esign/${referenceId}`,
+        providerRequestId: signingRequest.providerReference,
+        signingUrl: signingRequest.signingUrl,
         status: ESignRequestStatus.SIGNING_LINK_CREATED,
-        providerStatus: 'LINK_CREATED',
+        providerStatus: signingRequest.mock ? 'MOCK_LINK_CREATED' : 'LINK_CREATED',
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        providerRequest: { idempotencyKey: idempotencyKey ?? null, mock: true },
-        providerResponse: { referenceId, signingUrl: `https://mock-provider.local/esign/${referenceId}` },
+        providerRequest: { ...signingRequest.request, idempotencyKey: idempotencyKey ?? null },
+        providerResponse: signingRequest.response,
       }),
     );
     await this.esignHistory(request.id, null, ESignRequestStatus.SIGNING_LINK_CREATED, user.id, 'Mock eSign link created');
@@ -260,6 +282,16 @@ export class ProviderOperationsService {
     if (request.status === ESignRequestStatus.SIGNED) {
       return { processed: false, duplicate: true, request };
     }
+
+    const provider = request.providerId ? await this.providersRepository.findOne({ where: { id: request.providerId } }) : null;
+    const adapter = this.esignProviders.resolve(provider?.providerCode);
+    if (!adapter.isMock) {
+      const confirmed = await adapter.confirmStatus(request.providerRequestId, provider);
+      if (confirmed.status !== 'SIGNED') {
+        throw new BadRequestException(`Provider has not confirmed this document as signed (status: ${confirmed.status})`);
+      }
+    }
+
     const previous = request.status;
     request.status = ESignRequestStatus.SIGNED;
     request.providerStatus = payload.status;

@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEmail,
   IsEnum,
   IsInt,
   IsNumber,
@@ -10,6 +11,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  Matches,
   Max,
   Min,
   ValidateNested,
@@ -45,6 +47,74 @@ export class CreateOrganizationDto {
   @IsString()
   @Length(2, 180)
   legalName: string;
+
+  @IsOptional()
+  @IsString()
+  cin?: string;
+
+  @IsOptional()
+  @IsString()
+  rbiRegistrationNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  pan?: string;
+
+  @IsOptional()
+  @IsString()
+  gstin?: string;
+
+  @IsOptional()
+  @IsString()
+  registeredAddress?: string;
+
+  @IsOptional()
+  @IsObject()
+  supportDetails?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  defaultCurrency?: string;
+
+  @IsOptional()
+  @IsString()
+  timeZone?: string;
+
+  @IsOptional()
+  @IsEnum(MasterStatus)
+  status?: MasterStatus;
+
+  @IsOptional()
+  @IsString()
+  logoUrl?: string;
+
+  @IsOptional()
+  @IsObject()
+  authorizedSignatory?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  bankConfiguration?: Record<string, unknown>;
+}
+
+export class UpdateOrganizationDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 40)
+  organizationCode?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 120)
+  name?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 180)
+  legalName?: string;
 
   @IsOptional()
   @IsString()
@@ -139,6 +209,15 @@ export class CreateServiceProviderDto {
   @IsOptional()
   @IsObject()
   configuration?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  secrets?: Record<string, string>;
+}
+
+export class UpdateServiceProviderSecretsDto {
+  @IsObject()
+  secrets: Record<string, string>;
 }
 
 export class CreateProductDto {
@@ -611,6 +690,23 @@ export class AssignPartnerProductDto {
 }
 
 class ApplicantDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 80)
+  fullName?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Matches(/^[0-9+\-\s()]{7,20}$/, { message: 'phone must be a valid phone number' })
+  phone?: string;
+
   @IsNumber()
   @Min(1000)
   monthlyIncome: number;
@@ -639,6 +735,10 @@ export class CreateConfigurableApplicationDto {
   @IsOptional()
   @IsString()
   partnerId?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string;
 
   @IsNumber()
   @Min(1)

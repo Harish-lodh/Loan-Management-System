@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -9,6 +9,7 @@ import { AdminService } from './admin.service';
 import { AdminLoanApplicationsQueryDto, AdminRepaymentsQueryDto, AdminUsersQueryDto } from './dto/admin-query.dto';
 import { ApproveLoanDto } from './dto/approve-loan.dto';
 import { RejectLoanDto } from './dto/reject-loan.dto';
+import { AssignStaffRoleDto, CreateStaffUserDto, UpdateStaffUserDto } from './dto/staff-user.dto';
 import { UpdateRepaymentStatusDto } from './dto/update-repayment-status.dto';
 
 @Controller('admin')
@@ -64,5 +65,34 @@ export class AdminController {
     @Body() dto: UpdateRepaymentStatusDto,
   ) {
     return this.adminService.updateRepaymentStatus(id, dto.status, user);
+  }
+
+  @Get('staff-users')
+  staffUsers(@CurrentUser() user: RequestUser, @Query() query: AdminUsersQueryDto) {
+    return this.adminService.staffUsers(user, query);
+  }
+
+  @Post('staff-users')
+  createStaffUser(@CurrentUser() user: RequestUser, @Body() dto: CreateStaffUserDto) {
+    return this.adminService.createStaffUser(user, dto);
+  }
+
+  @Patch('staff-users/:id')
+  updateStaffUser(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateStaffUserDto) {
+    return this.adminService.updateStaffUser(user, id, dto);
+  }
+
+  @Post('staff-users/:id/roles')
+  assignStaffRole(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: AssignStaffRoleDto) {
+    return this.adminService.assignStaffRole(user, id, dto);
+  }
+
+  @Delete('staff-users/:id/roles/:organizationId/:roleName')
+  removeStaffRole(
+    @Param('id') id: string,
+    @Param('organizationId') organizationId: string,
+    @Param('roleName') roleName: string,
+  ) {
+    return this.adminService.removeStaffRole(id, organizationId, roleName);
   }
 }

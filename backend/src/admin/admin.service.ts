@@ -11,18 +11,23 @@ import {
   LoanStatus,
   Repayment,
   RepaymentStatus,
+  Role,
   User,
+  UserRole,
 } from '../database/entities';
 import { LoansService } from '../loans/loans.service';
 import { RepaymentsService } from '../repayments/repayments.service';
-import { SafeUser } from '../users/users.service';
+import { SafeUser, UsersService } from '../users/users.service';
 import { AdminLoanApplicationsQueryDto, AdminRepaymentsQueryDto, AdminUsersQueryDto } from './dto/admin-query.dto';
+import { AssignStaffRoleDto, CreateStaffUserDto, UpdateStaffUserDto } from './dto/staff-user.dto';
 
 @Injectable()
 export class AdminService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(UserRole)
+    private readonly userRolesRepository: Repository<UserRole>,
     @InjectRepository(LoanApplication)
     private readonly applicationsRepository: Repository<LoanApplication>,
     @InjectRepository(Loan)
@@ -31,6 +36,7 @@ export class AdminService {
     private readonly repaymentsRepository: Repository<Repayment>,
     private readonly loansService: LoansService,
     private readonly repaymentsService: RepaymentsService,
+    private readonly usersService: UsersService,
   ) {}
 
   async dashboard(user: RequestUser) {
@@ -54,7 +60,7 @@ export class AdminService {
       applicationsByStatus,
       riskDistribution,
     ] = await Promise.all([
-      this.usersRepository.count({ where: this.organizationWhere(organizationId) }),
+      this.usersRepository.count({ where: this.organizationWhere(organizationId, { role: Role.CUSTOMER }) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.APPROVED }) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.REJECTED }) }),
@@ -111,10 +117,10 @@ export class AdminService {
     const organizationId = organizationScope(user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const builder = this.usersRepository.createQueryBuilder('user');
+    const builder = this.usersRepository.createQueryBuilder('user').where('user.role = :role', { role: Role.CUSTOMER });
 
     if (organizationId) {
-      builder.where('user.organizationId = :organizationId', { organizationId });
+      builder.andWhere('user.organizationId = :organizationId', { organizationId });
     }
 
     if (query.search) {
@@ -135,7 +141,7 @@ export class AdminService {
   async userDetails(user: RequestUser, id: string) {
     const organizationId = organizationScope(user);
     const targetUser = await this.usersRepository.findOne({
-      where: this.organizationWhere(organizationId, { id }),
+      where: this.organizationWhere(organizationId, { id, role: Role.CUSTOMER }),
       relations: {
         loanApplications: true,
         loans: { repayments: true },
@@ -405,5 +411,62 @@ export class AdminService {
   private sanitizeUser(user: User): SafeUser {
     const { password: _password, ...safeUser } = user;
     return safeUser;
+  }
+
+  async staffUsers(user: RequestUser, query: AdminUsersQueryDto) {
+    const organizationId = organizationScope(user);
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const builder = this.usersRepository
+      .createQueryBuilder('user')
+      .where('user.role IN (:...roles)', { roles: [Role.USER, Role.ADMIN] });
+
+    if (organizationId) {
+      builder.andWhere('user.organizationId = :organizationId', { organizationId });
+    }
+
+    if (query.search) {
+      builder.andWhere('(user.name LIKE :search OR user.email LIKE :search OR user.phone LIKE :search)', {
+        search: `%${query.search}%`,
+      });
+    }
+
+    const [users, total] = await builder
+      .orderBy('user.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return { items: users.map((staffUser) => this.sanitizeUser(staffUser)), meta: paginationMeta(total, page, limit) };
+  }
+
+  createStaffUser(user: RequestUser, dto: CreateStaffUserDto) {
+    const organizationId = organizationScope(user) ?? dto.organizationId ?? null;
+    return this.usersService.createStaffUser({ ...dto, organizationId });
+  }
+
+  updateStaffUser(user: RequestUser, id: string, dto: UpdateStaffUserDto) {
+    return this.usersService.updateStaffUser(id, dto);
+  }
+
+  async assignStaffRole(user: RequestUser, id: string, dto: AssignStaffRoleDto) {
+    const staffUser = await this.usersRepository.findOne({ where: { id } });
+    if (!staffUser || staffUser.role === Role.CUSTOMER) {
+      throw new NotFoundException('Staff user not found');
+    }
+    const existing = await this.userRolesRepository.findOne({
+      where: { userId: id, organizationId: dto.organizationId, roleName: dto.roleName },
+    });
+    if (existing) {
+      return existing;
+    }
+    return this.userRolesRepository.save(
+      this.userRolesRepository.create({ userId: id, organizationId: dto.organizationId, roleName: dto.roleName }),
+    );
+  }
+
+  async removeStaffRole(id: string, organizationId: string, roleName: string) {
+    await this.userRolesRepository.delete({ userId: id, organizationId, roleName });
+    return { message: 'Role assignment removed' };
   }
 }

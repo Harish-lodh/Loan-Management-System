@@ -10,7 +10,7 @@ export default function AdminRoute() {
   }
 
   if (!isAdmin) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/profile" replace />;
   }
 
   return <Outlet />;

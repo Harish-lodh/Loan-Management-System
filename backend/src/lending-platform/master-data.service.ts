@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { encryptSecrets } from '../common/crypto/secret-cipher.util';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
   LoanApplication,
@@ -27,6 +28,7 @@ import {
   CreateProductDto,
   CreateServiceProviderDto,
   CreateWorkflowStepDto,
+  UpdateOrganizationDto,
   UpdatePartnerDto,
   UpdateProductDto,
 } from './dto';
@@ -103,6 +105,30 @@ export class MasterDataService {
       throw new NotFoundException('Organization not found');
     }
     return organization;
+  }
+
+  async updateOrganization(id: string, dto: UpdateOrganizationDto, user: RequestUser) {
+    assertOrganizationAccess(user, id, 'organization');
+    const organization = await this.organizationsRepository.findOne({ where: { id } });
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    Object.assign(organization, {
+      ...dto,
+      organizationCode: dto.organizationCode ? dto.organizationCode.toUpperCase() : organization.organizationCode,
+      updatedBy: user.id,
+    });
+
+    const saved = await this.organizationsRepository.save(organization);
+    await this.auditLogService.create({
+      action: 'ORGANIZATION_UPDATED',
+      entityType: 'Organization',
+      entityId: saved.id,
+      actorUserId: user.id,
+      metadata: { fields: Object.keys(dto) },
+    });
+    return saved;
   }
 
   async createProduct(dto: CreateProductDto, user: RequestUser) {
@@ -378,6 +404,7 @@ export class MasterDataService {
   listPartners(user: RequestUser) {
     return this.partnersRepository.find({
       where: organizationScopedWhere(user),
+      relations: { productMappings: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -474,13 +501,15 @@ export class MasterDataService {
 
   createServiceProvider(dto: CreateServiceProviderDto, user: RequestUser) {
     const organizationId = resolveOrganizationForCreate(user, dto.organizationId, 'service provider');
+    const { secrets, ...rest } = dto;
     return this.providersRepository.save(
       this.providersRepository.create({
-        ...dto,
+        ...rest,
         organizationId,
         providerCode: dto.providerCode.toUpperCase(),
         status: dto.status ?? MasterStatus.ACTIVE,
         isSandbox: dto.isSandbox ?? true,
+        secretsEncrypted: secrets ? encryptSecrets(secrets) : null,
       }),
     );
   }
@@ -490,6 +519,23 @@ export class MasterDataService {
       where: organizationScopedWhere(user),
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async updateServiceProviderSecrets(id: string, secrets: Record<string, string>, user: RequestUser) {
+    const provider = await this.providersRepository.findOne({ where: organizationScopedWhere(user, { id }) });
+    if (!provider) {
+      throw new NotFoundException('Service provider not found');
+    }
+    provider.secretsEncrypted = encryptSecrets(secrets);
+    await this.providersRepository.save(provider);
+    await this.auditLogService.create({
+      action: 'PROVIDER_SECRETS_ROTATED',
+      entityType: 'ServiceProvider',
+      entityId: provider.id,
+      actorUserId: user.id,
+      metadata: { providerCode: provider.providerCode },
+    });
+    return { message: 'Provider secrets updated' };
   }
 
   private async latestVersion(productId: string) {

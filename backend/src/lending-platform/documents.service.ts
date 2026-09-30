@@ -17,6 +17,7 @@ import {
 import { ConfigurationResolverService } from './configuration-resolver.service';
 import { CreateDocumentTemplateDto, PreviewTemplateDto } from './dto';
 import { assertOrganizationAccess, organizationScopedWhere, resolveOrganizationForCreate } from './organization-scope';
+import { htmlToPdfBase64 } from './pdf.util';
 import { WorkflowService } from './workflow.service';
 
 const allowedPlaceholders = [
@@ -240,6 +241,15 @@ export class DocumentsService {
     });
 
     return { document, application };
+  }
+
+  async renderToPdfBase64(documentId: string, user: RequestUser) {
+    const document = await this.generatedDocumentsRepository.findOne({ where: { id: documentId } });
+    if (!document) {
+      throw new NotFoundException('Generated document not found');
+    }
+    assertOrganizationAccess(user, document.organizationId, 'document');
+    return htmlToPdfBase64(document.contentHtml ?? '');
   }
 
   async listGeneratedDocuments(applicationId: string, user: RequestUser) {

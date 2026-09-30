@@ -19,6 +19,8 @@ import { Organization } from './organization.entity';
 import { PartnerProduct } from './partner-product.entity';
 import { PartnerProviderConfiguration } from './partner-provider-configuration.entity';
 import { Partner } from './partner.entity';
+import { PaymentCollectionRequest } from './payment-collection-request.entity';
+import { PaymentCollectionStatusHistory } from './payment-collection-status-history.entity';
 import { Permission } from './permission.entity';
 import { ProductApplicationField } from './product-application-field.entity';
 import { ProductEligibilityRule } from './product-eligibility-rule.entity';
@@ -57,6 +59,8 @@ export * from './organization.entity';
 export * from './partner-product.entity';
 export * from './partner-provider-configuration.entity';
 export * from './partner.entity';
+export * from './payment-collection-request.entity';
+export * from './payment-collection-status-history.entity';
 export * from './permission.entity';
 export * from './product-application-field.entity';
 export * from './product-eligibility-rule.entity';
@@ -95,6 +99,8 @@ export const DATABASE_ENTITIES = [
   PartnerProduct,
   PartnerProviderConfiguration,
   Partner,
+  PaymentCollectionRequest,
+  PaymentCollectionStatusHistory,
   Permission,
   ProductApplicationField,
   ProductEligibilityRule,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import { useAuth } from '../../context/AuthContext';
 import { showErrorToast, showSuccessToast } from '../../utils/toast';
@@ -8,7 +8,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [form, setForm] = useState({ email: 'maya@example.com', password: 'User@12345' });
+  const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,7 +19,7 @@ export default function LoginPage() {
     try {
       const user = await login(form.email, form.password);
       showSuccessToast('Signed in successfully');
-      navigate(location.state?.from || (user.role === 'ADMIN' ? '/admin' : '/dashboard'));
+      navigate(location.state?.from || (user.role === 'ADMIN' ? '/admin' : '/profile'));
     } catch (err) {
       setError(showErrorToast(err));
     } finally {
@@ -32,8 +32,8 @@ export default function LoginPage() {
       <Navbar />
       <main className="mx-auto flex max-w-md flex-col px-4 py-12">
         <div className="panel p-6">
-          <h1 className="text-2xl font-semibold text-slate-950">Login</h1>
-          <p className="mt-2 text-sm text-slate-500">Use a customer or bank-staff demo account.</p>
+          <h1 className="text-2xl font-semibold text-slate-950">Staff login</h1>
+          <p className="mt-2 text-sm text-slate-500">Internal access only. Contact your admin if you need an account.</p>
           {error ? <div className="mt-4 rounded-md bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
           <form className="mt-6 space-y-4" onSubmit={submit}>
             <div>
@@ -52,12 +52,6 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
-          <p className="mt-4 text-sm text-slate-500">
-            New here?{' '}
-            <Link to="/register" className="font-semibold text-bank">
-              Create an account
-            </Link>
-          </p>
         </div>
       </main>
     </div>

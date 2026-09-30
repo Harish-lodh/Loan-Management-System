@@ -47,6 +47,9 @@ export class ServiceProvider {
   @Column({ type: 'varchar', length: 180, nullable: true, select: false })
   webhookSecretReference?: string | null;
 
+  @Column({ type: 'text', nullable: true, select: false })
+  secretsEncrypted?: string | null;
+
   @Column({ type: 'json', nullable: true })
   supportedCapabilities?: string[] | null;
 

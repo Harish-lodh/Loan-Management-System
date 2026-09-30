@@ -1,6 +1,7 @@
 export enum Role {
   USER = 'USER',
   ADMIN = 'ADMIN',
+  CUSTOMER = 'CUSTOMER',
 }
 
 export enum MasterStatus {
@@ -252,6 +253,16 @@ export enum RepaymentStatus {
   PENDING = 'PENDING',
   PAID = 'PAID',
   OVERDUE = 'OVERDUE',
+}
+
+export enum PaymentCollectionStatus {
+  INITIATED = 'INITIATED',
+  LINK_CREATED = 'LINK_CREATED',
+  PENDING = 'PENDING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum NotificationType {

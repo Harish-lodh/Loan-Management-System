@@ -3,12 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { Loan, LoanApplication, Notification, Repayment } from '../database/entities';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { LoansController } from './loans.controller';
 import { LoansService } from './loans.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([LoanApplication, Loan, Repayment, Notification]), AuditLogModule, NotificationsModule],
-  controllers: [LoansController],
   providers: [LoansService],
   exports: [LoansService],
 })

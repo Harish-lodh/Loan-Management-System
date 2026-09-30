@@ -8,6 +8,7 @@ import { DatabaseModule } from './database/database.module';
 import { LendingPlatformModule } from './lending-platform/lending-platform.module';
 import { LoansModule } from './loans/loans.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentsModule } from './payments/payments.module';
 import { RepaymentsModule } from './repayments/repayments.module';
 import { UsersModule } from './users/users.module';
 
@@ -31,6 +32,7 @@ import { UsersModule } from './users/users.module';
     LoansModule,
     RepaymentsModule,
     NotificationsModule,
+    PaymentsModule,
     AdminModule,
   ],
 })

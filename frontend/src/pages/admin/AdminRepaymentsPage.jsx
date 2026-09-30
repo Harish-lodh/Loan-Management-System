@@ -13,6 +13,8 @@ export default function AdminRepaymentsPage() {
   const [filters, setFilters] = useState({ status: '', search: '', page: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [paymentLinks, setPaymentLinks] = useState({});
+  const [collecting, setCollecting] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -40,6 +42,28 @@ export default function AdminRepaymentsPage() {
       load();
     } catch (err) {
       setError(showErrorToast(err));
+    }
+  }
+
+  async function collectViaEasebuzz(repaymentId) {
+    setCollecting(repaymentId);
+    try {
+      const response = await api.post(`/api/v1/repayments/${repaymentId}/collect`);
+      setPaymentLinks((current) => ({ ...current, [repaymentId]: response.data.paymentUrl }));
+      showSuccessToast('Payment link created');
+    } catch (err) {
+      showErrorToast(err);
+    } finally {
+      setCollecting(null);
+    }
+  }
+
+  async function copyLink(url) {
+    try {
+      await navigator.clipboard.writeText(url);
+      showSuccessToast('Payment link copied');
+    } catch {
+      showErrorToast('Could not copy link');
     }
   }
 
@@ -86,6 +110,7 @@ export default function AdminRepaymentsPage() {
                   <th className="px-4 py-3">Overdue</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Update</th>
+                  <th className="px-4 py-3">Collect payment</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -110,6 +135,23 @@ export default function AdminRepaymentsPage() {
                           </option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      {repayment.status === 'PAID' ? (
+                        '-'
+                      ) : paymentLinks[repayment.id] ? (
+                        <button className="font-semibold text-bank" onClick={() => copyLink(paymentLinks[repayment.id])}>
+                          Copy link
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-secondary px-3 py-1 text-xs"
+                          disabled={collecting === repayment.id}
+                          onClick={() => collectViaEasebuzz(repayment.id)}
+                        >
+                          {collecting === repayment.id ? 'Creating...' : 'Collect via Easebuzz'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -42,12 +42,6 @@ export function AuthProvider({ children }) {
         setUser(response.data.user);
         return response.data.user;
       },
-      async register(payload) {
-        const response = await api.post('/auth/register', payload);
-        setAuthSession(response.data);
-        setUser(response.data.user);
-        return response.data.user;
-      },
       async refreshUser() {
         const response = await api.get('/users/profile');
         localStorage.setItem('loan_app_user', JSON.stringify(response.data));

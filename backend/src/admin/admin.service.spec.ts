@@ -37,6 +37,12 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
     createQueryBuilder: jest.fn(() => queryBuilder()),
     findOne: jest.fn(),
   };
+  const userRolesRepository = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+    create: jest.fn((input) => input),
+    delete: jest.fn(),
+  };
   const applicationsRepository = {
     count: jest.fn(),
     createQueryBuilder: jest.fn(() => queryBuilder()),
@@ -51,25 +57,30 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
   };
   const loansService = { approveApplication: jest.fn(), rejectApplication: jest.fn() };
   const repaymentsService = { refreshOverdueRepayments: jest.fn(), updateStatusForAdmin: jest.fn() };
+  const usersService = { createStaffUser: jest.fn(), updateStaffUser: jest.fn() };
 
   const dependencies = {
     usersRepository,
+    userRolesRepository,
     applicationsRepository,
     loansRepository,
     repaymentsRepository,
     loansService,
     repaymentsService,
+    usersService,
     ...overrides,
   };
 
   return {
     service: new AdminService(
       dependencies.usersRepository as never,
+      dependencies.userRolesRepository as never,
       dependencies.applicationsRepository as never,
       dependencies.loansRepository as never,
       dependencies.repaymentsRepository as never,
       dependencies.loansService as never,
       dependencies.repaymentsService as never,
+      dependencies.usersService as never,
     ),
     dependencies,
   };
@@ -83,7 +94,7 @@ describe('AdminService tenant isolation', () => {
     await expect(service.userDetails(scopedAdmin, 'user-2')).rejects.toBeInstanceOf(NotFoundException);
     expect(dependencies.usersRepository.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'user-2', organizationId: 'org-1' },
+        where: { id: 'user-2', organizationId: 'org-1', role: Role.CUSTOMER },
       }),
     );
   });

@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -7,7 +7,6 @@ import { Role } from '../database/entities/enums';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { RegisterDto } from './dto/register.dto';
 
 interface RefreshPayload {
   sub: string;
@@ -25,33 +24,6 @@ export class AuthService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
-  async register(dto: RegisterDto) {
-    const existing = await this.usersService.findByEmail(dto.email);
-    if (existing) {
-      throw new ConflictException('Email is already registered');
-    }
-
-    const saltRounds = Number(this.config.get<string>('BCRYPT_SALT_ROUNDS') ?? 12);
-    const password = await bcrypt.hash(dto.password, saltRounds);
-    const user = await this.usersService.create({
-      name: dto.name,
-      email: dto.email,
-      phone: dto.phone,
-      password,
-      role: Role.USER,
-    });
-
-    await this.auditLogService.create({
-      action: 'USER_REGISTERED',
-      entityType: 'User',
-      entityId: user.id,
-      actorUserId: user.id,
-      metadata: { email: user.email, role: user.role },
-    });
-
-    return this.issueSession(user);
-  }
-
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) {
@@ -60,6 +32,10 @@ export class AuthService {
 
     const passwordMatches = await bcrypt.compare(dto.password, user.password);
     if (!passwordMatches) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (user.role === Role.CUSTOMER || !user.isActive) {
       throw new UnauthorizedException('Invalid email or password');
     }
 

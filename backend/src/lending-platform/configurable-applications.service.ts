@@ -14,6 +14,7 @@ import {
   Role,
 } from '../database/entities';
 import { assessLoanRisk, calculateEmi } from '../loans/loan-calculations';
+import { UsersService } from '../users/users.service';
 import { ConfigurationResolverService, ResolvedConfiguration } from './configuration-resolver.service';
 import { CreateConfigurableApplicationDto, DecisionDto, UpdateConfigurableApplicationDto } from './dto';
 import { moneyToString, percentageOf, subtractMoney } from './money.util';
@@ -36,12 +37,14 @@ export class ConfigurableApplicationsService {
     private readonly ruleEngine: RuleEngineService,
     private readonly workflowService: WorkflowService,
     private readonly auditLogService: AuditLogService,
+    private readonly usersService: UsersService,
   ) {}
 
   async createDraft(user: RequestUser, dto: CreateConfigurableApplicationDto) {
     const resolved = await this.resolver.resolveLive(dto.productId, dto.partnerId, organizationScope(user));
     this.ensureActiveProduct(resolved);
     this.validateApplicationInput(dto, resolved);
+    const customer = await this.resolveCustomer(dto, resolved.product.organizationId);
     const applicant = this.normalizeApplicant(dto.applicant);
     const pricing = this.pricing(dto.requestedAmount, resolved);
     const emi = calculateEmi({
@@ -60,7 +63,7 @@ export class ConfigurableApplicationsService {
 
     const application = await this.applicationsRepository.save(
       this.applicationsRepository.create({
-        userId: user.id,
+        userId: customer.id,
         applicationNumber: this.applicationNumber(),
         organizationId: resolved.product.organizationId,
         partnerId: resolved.partner?.id ?? null,
@@ -458,6 +461,27 @@ export class ConfigurableApplicationsService {
     };
   }
 
+  private async resolveCustomer(dto: CreateConfigurableApplicationDto, organizationId: string) {
+    if (dto.customerId) {
+      const customer = await this.usersService.findById(dto.customerId);
+      if (!customer || customer.role !== Role.CUSTOMER || customer.organizationId !== organizationId) {
+        throw new BadRequestException('customerId does not reference a valid customer in this organization');
+      }
+      return customer;
+    }
+    const { fullName, email, phone } = dto.applicant;
+    if (!fullName || !email || !phone) {
+      throw new BadRequestException(
+        'Provide an existing customerId, or applicant.fullName, applicant.email and applicant.phone to create a new customer',
+      );
+    }
+    const existing = await this.usersService.findCustomerByEmail(email, organizationId);
+    if (existing) {
+      return existing;
+    }
+    return this.usersService.createCustomer({ name: fullName, email, phone, organizationId });
+  }
+
   private normalizeApplicant(input: CreateConfigurableApplicationDto['applicant']) {
     if (!Object.values(EmploymentType).includes(input.employmentType as EmploymentType)) {
       throw new BadRequestException('Unsupported employment type');
@@ -490,9 +514,6 @@ export class ConfigurableApplicationsService {
 
   private ensureAccess(application: LoanApplication, user: RequestUser) {
     assertOrganizationAccess(user, application.organizationId, 'application');
-    if (user.role !== Role.ADMIN && application.userId !== user.id) {
-      throw new ForbiddenException('You cannot access this application');
-    }
   }
 
   private applicationNumber() {

@@ -22,8 +22,10 @@ import {
   PreviewTemplateDto,
   ProviderWebhookDto,
   UpdateConfigurableApplicationDto,
+  UpdateOrganizationDto,
   UpdatePartnerDto,
   UpdateProductDto,
+  UpdateServiceProviderSecretsDto,
 } from './dto';
 import { MasterDataService } from './master-data.service';
 import { ProviderOperationsService } from './provider-operations.service';
@@ -49,6 +51,12 @@ export class OrganizationsController {
   @Permissions('organization.view')
   get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.masterData.getOrganization(id, user);
+  }
+
+  @Patch(':id')
+  @Permissions('organization.update')
+  update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateOrganizationDto) {
+    return this.masterData.updateOrganization(id, dto, user);
   }
 }
 
@@ -193,6 +201,12 @@ export class ServiceProvidersController {
   @Permissions('provider.view')
   list(@CurrentUser() user: RequestUser) {
     return this.masterData.listServiceProviders(user);
+  }
+
+  @Patch(':id/secrets')
+  @Permissions('provider.configure')
+  updateSecrets(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateServiceProviderSecretsDto) {
+    return this.masterData.updateServiceProviderSecrets(id, dto.secrets, user);
   }
 }
 

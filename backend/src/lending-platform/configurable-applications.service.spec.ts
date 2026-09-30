@@ -20,6 +20,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
   const ruleEngine = { evaluateRules: jest.fn() };
   const workflowService = { nextCustomerActions: jest.fn(), allowedNextStatuses: jest.fn(), assertTransition: jest.fn(), statusAfterCreditApproval: jest.fn() };
   const auditLogService = { create: jest.fn() };
+  const usersService = { findById: jest.fn(), findCustomerByEmail: jest.fn(), createCustomer: jest.fn() };
 
   const dependencies = {
     applicationsRepository,
@@ -30,6 +31,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
     ruleEngine,
     workflowService,
     auditLogService,
+    usersService,
     ...overrides,
   };
 
@@ -43,6 +45,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
       dependencies.ruleEngine as never,
       dependencies.workflowService as never,
       dependencies.auditLogService as never,
+      dependencies.usersService as never,
     ),
     dependencies,
   };

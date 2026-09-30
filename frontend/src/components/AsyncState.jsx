@@ -10,11 +10,18 @@ export function LoadingState({ label = 'Loading...' }) {
   );
 }
 
-export function ErrorState({ message }) {
+export function ErrorState({ message, onRetry }) {
   return (
-    <div className="panel flex items-start gap-3 bg-rose-50 p-6 text-sm text-rose-700">
-      <AlertCircle size={18} />
-      <span>{message}</span>
+    <div className="panel flex flex-wrap items-start justify-between gap-3 bg-rose-50 p-6 text-sm text-rose-700">
+      <div className="flex items-start gap-3">
+        <AlertCircle size={18} />
+        <span>{message}</span>
+      </div>
+      {onRetry ? (
+        <button className="btn-secondary border-rose-200 px-3 py-1.5 text-rose-700 hover:bg-rose-100" onClick={onRetry}>
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }

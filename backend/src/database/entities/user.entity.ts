@@ -58,6 +58,9 @@ export class User {
   @Column({ type: 'enum', enum: Role, default: Role.USER })
   role: Role;
 
+  @Column({ default: true })
+  isActive: boolean;
+
   @Column({ type: 'json', nullable: true })
   permissions?: string[] | null;
 

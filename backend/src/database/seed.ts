@@ -7,17 +7,11 @@ import {
   DocumentTemplateStatus,
   DocumentTemplateVersion,
   DocumentType,
-  EmploymentType,
   FeeType,
   InterestCalculationMethod,
   InterestType,
-  Loan,
-  LoanApplication,
   LoanApplicationStatus,
-  LoanStatus,
   MasterStatus,
-  Notification,
-  NotificationType,
   Organization,
   Partner,
   PartnerProduct,
@@ -32,8 +26,6 @@ import {
   ProductWorkflowStep,
   ProviderType,
   RepaymentFrequency,
-  Repayment,
-  RepaymentStatus,
   Role,
   RolePermission,
   ServiceProvider,
@@ -42,7 +34,6 @@ import {
   User,
 } from './entities';
 import { calculateAuditHash } from '../audit-log/audit-hash.util';
-import { assessLoanRisk, calculateEmi, generateRepaymentSchedule } from '../loans/loan-calculations';
 import { moneyToString, rateToString } from '../lending-platform/money.util';
 
 async function createAuditLog(input: {
@@ -113,241 +104,6 @@ async function upsertUser(
   return user;
 }
 
-async function createDemoLoan(user: User) {
-  const applicationRepository = dataSource.getRepository(LoanApplication);
-  const loanRepository = dataSource.getRepository(Loan);
-  const repaymentRepository = dataSource.getRepository(Repayment);
-  const notificationRepository = dataSource.getRepository(Notification);
-
-  const existingApplication = await applicationRepository.findOne({ where: { userId: user.id } });
-  if (existingApplication) {
-    return;
-  }
-
-  const input = {
-    amount: 250000,
-    tenureMonths: 24,
-    monthlyIncome: 85000,
-    employmentType: EmploymentType.SALARIED,
-    existingMonthlyDebt: 8000,
-    creditScore: 760,
-  };
-  const annualInterestRate = Number(process.env.ANNUAL_INTEREST_RATE ?? 12);
-  const risk = assessLoanRisk(input);
-  const emi = calculateEmi({
-    principal: input.amount,
-    tenureMonths: input.tenureMonths,
-    annualInterestRate,
-  });
-  const application = await applicationRepository.save(
-    applicationRepository.create({
-      userId: user.id,
-      amount: input.amount,
-      tenureMonths: input.tenureMonths,
-      monthlyIncome: input.monthlyIncome,
-      employmentType: input.employmentType,
-      existingMonthlyDebt: input.existingMonthlyDebt,
-      creditScore: input.creditScore,
-      purpose: 'Home office renovation',
-      status: LoanApplicationStatus.APPROVED,
-      riskScore: risk.riskScore,
-      approvalLikelihood: risk.approvalLikelihood,
-      riskExplanation: risk.riskExplanation,
-      scoreBreakdown: risk.scoreBreakdown,
-      annualInterestRate,
-      emi: emi.monthlyEmi,
-      totalPayable: emi.totalPayable,
-      totalInterest: emi.totalInterest,
-      adminComment: 'Seeded approved demo loan',
-      submittedAt: new Date(),
-      reviewedAt: new Date(),
-      statusHistory: [
-        {
-          status: LoanApplicationStatus.SUBMITTED,
-          changedAt: new Date().toISOString(),
-          actorUserId: user.id,
-          comment: 'Seeded submitted application',
-        },
-        {
-          status: LoanApplicationStatus.IN_REVIEW,
-          changedAt: new Date().toISOString(),
-          actorUserId: null,
-          comment: 'Seeded transparent risk review',
-        },
-        {
-          status: LoanApplicationStatus.APPROVED,
-          changedAt: new Date().toISOString(),
-          actorUserId: null,
-          comment: 'Seeded approval',
-        },
-      ],
-    }),
-  );
-
-  const startDate = new Date();
-  startDate.setMonth(startDate.getMonth() - 1);
-  const loan = await loanRepository.save(
-    loanRepository.create({
-      userId: user.id,
-      applicationId: application.id,
-      principal: input.amount,
-      annualInterestRate,
-      tenureMonths: input.tenureMonths,
-      emi: emi.monthlyEmi,
-      totalPayable: emi.totalPayable,
-      outstandingBalance: input.amount,
-      status: LoanStatus.ACTIVE,
-      disbursedAt: startDate,
-      startDate,
-      statusHistory: [
-        {
-          status: LoanStatus.ACTIVE,
-          changedAt: new Date().toISOString(),
-          actorUserId: null,
-          comment: 'Seeded active loan',
-        },
-      ],
-    }),
-  );
-
-  const schedule = generateRepaymentSchedule({
-    principal: input.amount,
-    tenureMonths: input.tenureMonths,
-    annualInterestRate,
-    startDate,
-  });
-  await repaymentRepository.save(
-    schedule.map((item, index) =>
-      repaymentRepository.create({
-        loanId: loan.id,
-        userId: user.id,
-        dueDate: item.dueDate,
-        emiAmount: item.emiAmount,
-        principalComponent: item.principalComponent,
-        interestComponent: item.interestComponent,
-        status: index === 0 ? RepaymentStatus.PAID : RepaymentStatus.PENDING,
-        paidAmount: index === 0 ? item.emiAmount : 0,
-        paidAt: index === 0 ? new Date() : null,
-      }),
-    ),
-  );
-
-  await notificationRepository.save([
-    notificationRepository.create({
-      userId: user.id,
-      title: 'Loan approved',
-      message: 'Your demo loan is active with a generated repayment schedule.',
-      type: NotificationType.LOAN_APPROVED,
-      priority: 'HIGH',
-      actionUrl: `/loans/${loan.id}`,
-    }),
-    notificationRepository.create({
-      userId: user.id,
-      title: 'Upcoming payment scheduled',
-      message: `Your next EMI of ${emi.monthlyEmi.toFixed(2)} is coming up soon.`,
-      type: NotificationType.PAYMENT_DUE,
-      actionUrl: '/repayments',
-    }),
-  ]);
-
-  await createAuditLog({
-    action: 'LOAN_APPLICATION_SUBMITTED',
-    entityType: 'LoanApplication',
-    entityId: application.id,
-    actorUserId: user.id,
-    metadata: { seeded: true, amount: application.amount },
-  });
-  await createAuditLog({
-    action: 'LOAN_APPROVED',
-    entityType: 'LoanApplication',
-    entityId: application.id,
-    actorUserId: null,
-    metadata: { seeded: true, riskScore: application.riskScore },
-  });
-  await createAuditLog({
-    action: 'LOAN_DISBURSED',
-    entityType: 'Loan',
-    entityId: loan.id,
-    actorUserId: null,
-    metadata: { seeded: true, principal: loan.principal },
-  });
-}
-
-async function createDemoDraft(user: User) {
-  const applicationRepository = dataSource.getRepository(LoanApplication);
-  const notificationRepository = dataSource.getRepository(Notification);
-
-  const existingApplication = await applicationRepository.findOne({ where: { userId: user.id } });
-  if (existingApplication) {
-    return;
-  }
-
-  const input = {
-    amount: 180000,
-    tenureMonths: 18,
-    monthlyIncome: 62000,
-    employmentType: EmploymentType.SELF_EMPLOYED,
-    existingMonthlyDebt: 12000,
-    creditScore: 690,
-  };
-  const annualInterestRate = Number(process.env.ANNUAL_INTEREST_RATE ?? 12);
-  const risk = assessLoanRisk(input);
-  const emi = calculateEmi({
-    principal: input.amount,
-    tenureMonths: input.tenureMonths,
-    annualInterestRate,
-  });
-
-  const application = await applicationRepository.save(
-    applicationRepository.create({
-      userId: user.id,
-      amount: input.amount,
-      tenureMonths: input.tenureMonths,
-      monthlyIncome: input.monthlyIncome,
-      employmentType: input.employmentType,
-      existingMonthlyDebt: input.existingMonthlyDebt,
-      creditScore: input.creditScore,
-      purpose: 'Two-wheeler purchase',
-      status: LoanApplicationStatus.DRAFT,
-      riskScore: risk.riskScore,
-      approvalLikelihood: risk.approvalLikelihood,
-      riskExplanation: risk.riskExplanation,
-      scoreBreakdown: risk.scoreBreakdown,
-      annualInterestRate,
-      emi: emi.monthlyEmi,
-      totalPayable: emi.totalPayable,
-      totalInterest: emi.totalInterest,
-      statusHistory: [
-        {
-          status: LoanApplicationStatus.DRAFT,
-          changedAt: new Date().toISOString(),
-          actorUserId: user.id,
-          comment: 'Seeded draft application',
-        },
-      ],
-    }),
-  );
-
-  await notificationRepository.save(
-    notificationRepository.create({
-      userId: user.id,
-      title: 'Loan draft saved',
-      message: 'Your two-wheeler loan draft is ready to submit.',
-      type: NotificationType.APPLICATION_DRAFTED,
-      priority: 'LOW',
-      actionUrl: `/loans/${application.id}`,
-    }),
-  );
-
-  await createAuditLog({
-    action: 'LOAN_APPLICATION_DRAFTED',
-    entityType: 'LoanApplication',
-    entityId: application.id,
-    actorUserId: user.id,
-    metadata: { seeded: true, amount: application.amount },
-  });
-}
-
 async function upsertOrganization() {
   const repository = dataSource.getRepository(Organization);
   const existing = await repository.findOne({ where: { organizationCode: 'FTLEND' } });
@@ -381,6 +137,7 @@ async function seedPermissions(organization: Organization, admin: User) {
   const codes = [
     'organization.create',
     'organization.view',
+    'organization.update',
     'product.create',
     'product.view',
     'product.update',
@@ -401,6 +158,8 @@ async function seedPermissions(organization: Organization, admin: User) {
     'esign.initiate',
     'enach.initiate',
     'disbursement.initiate',
+    'payment.collect',
+    'staff.manage',
     'audit.view',
   ];
 
@@ -754,6 +513,7 @@ async function upsertAgreementTemplate(organization: Organization, product: Prod
     ],
   };
   if (template) {
+    
     Object.assign(template, payload);
     template = await templateRepository.save(template);
   } else {
@@ -806,6 +566,9 @@ async function seed() {
     'Mock Disbursement Provider',
     ProviderType.DISBURSEMENT,
   );
+  await upsertProvider(organization, 'EASEBUZZ', 'Easebuzz', ProviderType.PAYMENT_GATEWAY);
+  await upsertProvider(organization, 'DIGIO', 'Digio', ProviderType.ESIGN);
+  await upsertProvider(organization, 'DOQUFY', 'Doqufy', ProviderType.ESIGN);
 
   const personalLoan = await upsertProduct(organization, {
     productCode: 'PERSONAL_LOAN',
@@ -859,12 +622,22 @@ async function seed() {
   await upsertAgreementTemplate(organization, salaryAdvance.product);
   await upsertAgreementTemplate(organization, merchantLoan.product);
 
+  const staff = await upsertUser({
+    name: 'Ops Staff',
+    email: 'staff@demo.bank',
+    phone: '+91 90000 00004',
+    password: 'Staff@12345',
+    role: Role.USER,
+    occupation: 'Loan operations executive',
+  });
+  await dataSource.getRepository(User).update(staff.id, { organizationId: organization.id });
+
   const maya = await upsertUser({
     name: 'Maya Sharma',
     email: 'maya@example.com',
     phone: '+91 90000 00002',
     password: 'User@12345',
-    role: Role.USER,
+    role: Role.CUSTOMER,
     address: 'Indiranagar, Bengaluru',
     occupation: 'Product designer',
     annualIncome: 1020000,
@@ -875,21 +648,19 @@ async function seed() {
     email: 'arjun@example.com',
     phone: '+91 90000 00003',
     password: 'User@12345',
-    role: Role.USER,
+    role: Role.CUSTOMER,
     address: 'Andheri West, Mumbai',
     occupation: 'Freelance consultant',
     annualIncome: 744000,
   });
   await dataSource.getRepository(User).update(arjun.id, { organizationId: organization.id });
 
-  await createDemoLoan(maya);
-  await createDemoDraft(arjun);
   await createAuditLog({
     action: 'SEED_COMPLETED',
     entityType: 'User',
     entityId: admin.id,
     actorUserId: admin.id,
-    metadata: { demoUsers: 2, products: 3, partners: 2, mockProviders: 3 },
+    metadata: { staffUsers: 2, customers: 2, products: 3, partners: 2, providers: 6 },
   });
 
   await dataSource.destroy();
