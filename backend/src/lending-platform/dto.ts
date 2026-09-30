@@ -825,6 +825,30 @@ export class PreviewTemplateDto {
   sampleData: Record<string, unknown>;
 }
 
+export class ConfirmStepDto {
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  comments?: string;
+}
+
+export class ConfirmDisbursementDto {
+  // Bank transaction reference (UTR) of the NEFT/IMPS/RTGS transfer.
+  @IsString()
+  @Matches(/^[A-Za-z0-9]{6,30}$/, { message: 'utr must be 6-30 letters or digits' })
+  utr: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 120)
+  bankReference?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  comments?: string;
+}
+
 export class ProviderWebhookDto {
   @IsString()
   eventId: string;

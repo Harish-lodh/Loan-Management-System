@@ -283,8 +283,7 @@ export class ProviderOperationsService {
       return { processed: false, duplicate: true, request };
     }
 
-    const provider = request.providerId ? await this.providersRepository.findOne({ where: { id: request.providerId } }) : null;
-    const adapter = this.esignProviders.resolve(provider?.providerCode);
+    const { provider, adapter } = await this.esignAdapterFor(request);
     if (!adapter.isMock) {
       const confirmed = await adapter.confirmStatus(request.providerRequestId, provider);
       if (confirmed.status !== 'SIGNED') {
@@ -292,22 +291,169 @@ export class ProviderOperationsService {
       }
     }
 
+    const saved = await this.completeESign(request, {
+      providerStatus: payload.status,
+      response: payload.metadata ?? { ...payload },
+      actorUserId: null,
+      reason: 'Verified provider webhook',
+      metadata: { providerCode, eventId: payload.eventId },
+    });
+    return { processed: true, request: saved };
+  }
+
+  // Staff-triggered completion. With a real eSign provider the signature is confirmed with the provider;
+  // without one (mock/offline mode) staff confirm that the customer signed the agreement.
+  async confirmESign(id: string, user: RequestUser, comments?: string) {
+    const request = await this.esignRepository.findOne({ where: { id } });
+    if (!request) {
+      throw new NotFoundException('eSign request not found');
+    }
+    assertOrganizationAccess(user, request.organizationId, 'eSign request');
+    if (request.status === ESignRequestStatus.SIGNED) {
+      return request;
+    }
+    const { provider, adapter } = await this.esignAdapterFor(request);
+    let providerStatus = 'CONFIRMED_BY_STAFF';
+    if (!adapter.isMock) {
+      const confirmed = await adapter.confirmStatus(request.providerRequestId, provider);
+      if (confirmed.status !== 'SIGNED') {
+        throw new BadRequestException(`The customer has not signed yet (provider status: ${confirmed.status})`);
+      }
+      providerStatus = confirmed.status;
+    }
+    return this.completeESign(request, {
+      providerStatus,
+      response: { confirmedBy: user.id, comments: comments ?? null },
+      actorUserId: user.id,
+      reason: adapter.isMock ? `Signature confirmed by staff${comments ? `: ${comments}` : ''}` : 'Signature confirmed with provider',
+      metadata: { providerCode: provider?.providerCode ?? 'MOCK_ESIGN', manual: adapter.isMock },
+    });
+  }
+
+  // No live eNACH provider is integrated yet, so registration is confirmed by staff once the bank approves the mandate.
+  async confirmENach(id: string, user: RequestUser, comments?: string) {
+    const mandate = await this.enachRepository.findOne({ where: { id } });
+    if (!mandate) {
+      throw new NotFoundException('eNACH mandate not found');
+    }
+    assertOrganizationAccess(user, mandate.organizationId, 'eNACH mandate');
+    if (mandate.status === ENachMandateStatus.REGISTERED) {
+      return mandate;
+    }
+    const confirmable = [ENachMandateStatus.PENDING, ENachMandateStatus.INITIATED, ENachMandateStatus.CUSTOMER_ACTION_PENDING, ENachMandateStatus.PROCESSING];
+    if (!confirmable.includes(mandate.status)) {
+      throw new BadRequestException(`A ${mandate.status.toLowerCase()} mandate cannot be confirmed`);
+    }
+    return this.completeENach(mandate, {
+      providerStatus: 'CONFIRMED_BY_STAFF',
+      response: { confirmedBy: user.id, comments: comments ?? null },
+      actorUserId: user.id,
+      reason: `Mandate registration confirmed by staff${comments ? `: ${comments}` : ''}`,
+      metadata: { manual: true },
+    });
+  }
+
+  // Confirms a disbursement made outside the system (bank NEFT/IMPS/RTGS) using its UTR, then books the loan.
+  async confirmDisbursement(id: string, user: RequestUser, dto: { utr: string; bankReference?: string; comments?: string }) {
+    // Load without the statusHistory relation: saving an entity with that relation loaded makes TypeORM
+    // try to detach the existing history rows.
+    const disbursement = await this.disbursementsRepository.findOne({ where: { id } });
+    if (!disbursement) {
+      throw new NotFoundException('Disbursement not found');
+    }
+    assertOrganizationAccess(user, disbursement.organizationId, 'disbursement');
+    if (disbursement.status === DisbursementStatus.SUCCESS) {
+      return { processed: false, duplicate: true, disbursement };
+    }
+    if (![DisbursementStatus.INITIATED, DisbursementStatus.PROCESSING].includes(disbursement.status)) {
+      throw new BadRequestException(`A ${disbursement.status.toLowerCase()} disbursement cannot be confirmed`);
+    }
+    return this.completeDisbursement(
+      disbursement,
+      'MANUAL',
+      {
+        eventId: `manual-${Date.now()}`,
+        referenceId: disbursement.disbursementReference,
+        status: 'SUCCESS',
+        metadata: { utr: dto.utr.toUpperCase(), bankReference: dto.bankReference ?? dto.utr.toUpperCase(), comments: dto.comments ?? null, confirmedBy: user.id },
+      },
+      user.id,
+    );
+  }
+
+  // Everything the application screen needs to show the post-approval steps.
+  async operationsForApplication(applicationId: string, user: RequestUser) {
+    const application = await this.application(applicationId, user);
+    const [agreements, esign, enach, disbursement, loan] = await Promise.all([
+      this.documentsRepository.find({
+        where: { loanApplicationId: applicationId },
+        select: { id: true, fileName: true, documentType: true, checksum: true, createdAt: true },
+        order: { createdAt: 'DESC' },
+      }),
+      this.esignRepository.findOne({ where: { loanApplicationId: applicationId }, order: { createdAt: 'DESC' } }),
+      this.enachRepository.findOne({ where: { loanApplicationId: applicationId }, order: { createdAt: 'DESC' } }),
+      this.disbursementsRepository.findOne({ where: { loanApplicationId: applicationId }, order: { createdAt: 'DESC' } }),
+      this.loansRepository.findOne({ where: { applicationId } }),
+    ]);
+    const esignProvider = esign ? await this.esignAdapterFor(esign) : null;
+    return {
+      applicationId: application.id,
+      status: application.status,
+      agreements,
+      esign: esign ? { ...esign, manualConfirmation: esignProvider?.adapter.isMock ?? true } : null,
+      enach,
+      disbursement,
+      loan,
+    };
+  }
+
+  private async esignAdapterFor(request: ESignRequest) {
+    const provider = request.providerId ? await this.providersRepository.findOne({ where: { id: request.providerId } }) : null;
+    return { provider, adapter: this.esignProviders.resolve(provider?.providerCode) };
+  }
+
+  private async completeESign(
+    request: ESignRequest,
+    input: { providerStatus: string; response: Record<string, unknown>; actorUserId: string | null; reason: string; metadata: Record<string, unknown> },
+  ) {
     const previous = request.status;
     request.status = ESignRequestStatus.SIGNED;
-    request.providerStatus = payload.status;
+    request.providerStatus = input.providerStatus;
     request.signedAt = new Date();
-    request.providerResponse = payload.metadata ?? { ...payload };
+    request.providerResponse = input.response;
     const saved = await this.esignRepository.save(request);
-    await this.esignHistory(saved.id, previous, ESignRequestStatus.SIGNED, null, 'Verified mock eSign webhook');
+    await this.esignHistory(saved.id, previous, ESignRequestStatus.SIGNED, input.actorUserId, input.reason);
     await this.advanceAfterESign(saved.loanApplicationId);
     await this.auditLogService.create({
       action: 'ESIGN_COMPLETED',
       entityType: 'ESignRequest',
       entityId: saved.id,
-      actorUserId: null,
-      metadata: { providerCode, eventId: payload.eventId },
+      actorUserId: input.actorUserId,
+      metadata: { loanApplicationId: saved.loanApplicationId, ...input.metadata },
     });
-    return { processed: true, request: saved };
+    return saved;
+  }
+
+  private async completeENach(
+    mandate: ENachMandate,
+    input: { providerStatus: string; response: Record<string, unknown>; actorUserId: string | null; reason: string; metadata: Record<string, unknown> },
+  ) {
+    const previous = mandate.status;
+    mandate.status = ENachMandateStatus.REGISTERED;
+    mandate.providerStatus = input.providerStatus;
+    mandate.registeredAt = new Date();
+    mandate.providerResponse = input.response;
+    const saved = await this.enachRepository.save(mandate);
+    await this.enachHistory(saved.id, previous, ENachMandateStatus.REGISTERED, input.actorUserId, input.reason);
+    await this.advanceAfterENach(saved.loanApplicationId);
+    await this.auditLogService.create({
+      action: 'ENACH_REGISTERED',
+      entityType: 'ENachMandate',
+      entityId: saved.id,
+      actorUserId: input.actorUserId,
+      metadata: { loanApplicationId: saved.loanApplicationId, ...input.metadata },
+    });
+    return saved;
   }
 
   async handleENachWebhook(providerCode: string, payload: ProviderWebhookDto, headers: Record<string, string | string[] | undefined>) {
@@ -319,19 +465,11 @@ export class ProviderOperationsService {
     if (mandate.status === ENachMandateStatus.REGISTERED) {
       return { processed: false, duplicate: true, mandate };
     }
-    const previous = mandate.status;
-    mandate.status = ENachMandateStatus.REGISTERED;
-    mandate.providerStatus = payload.status;
-    mandate.registeredAt = new Date();
-    mandate.providerResponse = payload.metadata ?? { ...payload };
-    const saved = await this.enachRepository.save(mandate);
-    await this.enachHistory(saved.id, previous, ENachMandateStatus.REGISTERED, null, 'Verified mock eNACH webhook');
-    await this.advanceAfterENach(saved.loanApplicationId);
-    await this.auditLogService.create({
-      action: 'ENACH_REGISTERED',
-      entityType: 'ENachMandate',
-      entityId: saved.id,
+    const saved = await this.completeENach(mandate, {
+      providerStatus: payload.status,
+      response: payload.metadata ?? { ...payload },
       actorUserId: null,
+      reason: 'Verified provider webhook',
       metadata: { providerCode, eventId: payload.eventId },
     });
     return { processed: true, mandate: saved };
@@ -349,7 +487,7 @@ export class ProviderOperationsService {
     return this.completeDisbursement(disbursement, providerCode, payload);
   }
 
-  private async completeDisbursement(disbursement: Disbursement, providerCode: string, payload: ProviderWebhookDto) {
+  private async completeDisbursement(disbursement: Disbursement, providerCode: string, payload: ProviderWebhookDto, actorUserId: string | null = null) {
     return this.dataSource.transaction(async (manager) => {
       const application = await manager.findOneOrFail(LoanApplication, { where: { id: disbursement.loanApplicationId } });
       const existingLoan = await manager.findOne(Loan, { where: { applicationId: application.id } });
@@ -368,7 +506,8 @@ export class ProviderOperationsService {
         disbursementId: savedDisbursement.id,
         previousStatus: previous,
         newStatus: DisbursementStatus.SUCCESS,
-        reason: 'Verified mock disbursement webhook',
+        actorUserId,
+        reason: actorUserId ? `Confirmed by staff with UTR ${savedDisbursement.utr}` : 'Verified provider webhook',
       }));
 
       const startDate = new Date();
@@ -405,7 +544,7 @@ export class ProviderOperationsService {
         firstDueDate: schedule[0]?.dueDate ?? null,
         maturityDate: schedule[schedule.length - 1]?.dueDate ?? null,
         statusHistory: [
-          { status: LoanStatus.DISBURSED, changedAt: startDate.toISOString(), actorUserId: null, comment: 'Mock disbursement completed' },
+          { status: LoanStatus.DISBURSED, changedAt: startDate.toISOString(), actorUserId, comment: `Disbursed (UTR ${savedDisbursement.utr})` },
           { status: LoanStatus.ACTIVE, changedAt: startDate.toISOString(), actorUserId: null, comment: 'Loan account activated' },
         ],
       }));
@@ -463,8 +602,8 @@ export class ProviderOperationsService {
       application.statusHistory = [...(application.statusHistory ?? []), {
         status: LoanApplicationStatus.DISBURSED,
         changedAt: new Date().toISOString(),
-        actorUserId: null,
-        comment: 'Mock disbursement completed',
+        actorUserId,
+        comment: `Disbursed (UTR ${savedDisbursement.utr})`,
       }, {
         status: LoanApplicationStatus.ACTIVE,
         changedAt: new Date().toISOString(),
@@ -477,8 +616,8 @@ export class ProviderOperationsService {
         action: 'DISBURSEMENT_COMPLETED',
         entityType: 'Disbursement',
         entityId: savedDisbursement.id,
-        actorUserId: null,
-        metadata: { providerCode, eventId: payload.eventId, loanId: loan.id },
+        actorUserId,
+        metadata: { providerCode, eventId: payload.eventId, loanId: loan.id, utr: savedDisbursement.utr },
       });
       return { processed: true, loan, disbursement: savedDisbursement };
     });

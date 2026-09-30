@@ -6,7 +6,24 @@ import PaginationControls from '../../components/PaginationControls';
 import StatusBadge from '../../components/StatusBadge';
 import { showErrorToast } from '../../utils/toast';
 
-const statuses = ['', 'DRAFT', 'SUBMITTED', 'IN_REVIEW', 'AUTO_REVIEWED', 'APPROVED', 'REJECTED'];
+const statuses = [
+  '',
+  'DRAFT',
+  'SUBMITTED',
+  'KYC_PENDING',
+  'BANK_VERIFICATION_PENDING',
+  'UNDER_REVIEW',
+  'AGREEMENT_PENDING',
+  'ESIGN_PENDING',
+  'ENACH_PENDING',
+  'READY_FOR_DISBURSEMENT',
+  'DISBURSEMENT_PENDING',
+  'ACTIVE',
+  'CREDIT_REJECTED',
+  'IN_REVIEW',
+  'APPROVED',
+  'REJECTED',
+];
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
 export default function LoanApplicationsPage() {

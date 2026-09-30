@@ -35,6 +35,14 @@ const tones = {
   PAID: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   OVERDUE: 'bg-red-50 text-red-700 ring-red-200',
   VALID: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  BLOCKED: 'bg-rose-50 text-rose-700 ring-rose-200',
+  SIGNING_LINK_CREATED: 'bg-purple-50 text-purple-700 ring-purple-200',
+  CUSTOMER_ACTION_PENDING: 'bg-purple-50 text-purple-700 ring-purple-200',
+  SIGNED: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  REGISTERED: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  PROCESSING: 'bg-blue-50 text-blue-700 ring-blue-200',
+  SUCCESS: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  FAILED: 'bg-rose-50 text-rose-700 ring-rose-200',
   BROKEN: 'bg-red-50 text-red-700 ring-red-200',
 };
 

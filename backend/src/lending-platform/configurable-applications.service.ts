@@ -46,12 +46,8 @@ export class ConfigurableApplicationsService {
     this.validateApplicationInput(dto, resolved);
     const customer = await this.resolveCustomer(user, dto, resolved.product.organizationId);
     const applicant = this.normalizeApplicant(dto.applicant);
-    const pricing = this.pricing(dto.requestedAmount, resolved);
-    const emi = calculateEmi({
-      principal: dto.requestedAmount,
-      annualInterestRate: Number(resolved.partnerProduct?.interestRateOverride ?? resolved.product.defaultInterestRate),
-      tenureMonths: dto.tenure,
-    });
+    const annualInterestRate = Number(resolved.partnerProduct?.interestRateOverride ?? resolved.product.defaultInterestRate);
+    const derived = this.amountDerivedFields(dto.requestedAmount, dto.tenure, annualInterestRate, resolved);
     const risk = assessLoanRisk({
       amount: dto.requestedAmount,
       tenureMonths: dto.tenure,
@@ -184,7 +180,7 @@ export class ConfigurableApplicationsService {
     const pricing = application.pricingBreakdown ?? this.pricing(Number(application.requestedAmount ?? application.amount), resolved);
     const snapshotPayload = this.resolver.createSnapshotPayload(resolved, applicantSnapshot, pricing);
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const snapshot = await manager.save(
         ApplicationConfigurationSnapshot,
         manager.create(ApplicationConfigurationSnapshot, {
@@ -233,8 +229,11 @@ export class ConfigurableApplicationsService {
         },
       });
 
-      return { application: saved, snapshot, ruleEvaluation, nextActions: this.workflowService.nextCustomerActions(saved.status, resolved.workflow) };
+      return { application: saved, snapshot, ruleEvaluation };
     });
+
+    const continued = await this.continueAfterAutomaticApproval(result.application, resolved.workflow);
+    return { ...result, application: continued, nextActions: this.workflowService.nextCustomerActions(continued.status, resolved.workflow) };
   }
 
   async evaluate(id: string, user: RequestUser) {
@@ -263,7 +262,18 @@ export class ConfigurableApplicationsService {
     if (!next) {
       throw new BadRequestException('No next workflow step is available');
     }
-    return this.move(application, next, 'complete_step', user, comments ?? 'Operational step completed', resolved.workflow);
+    const moved = await this.move(application, next, 'complete_step', user, comments ?? 'Operational step completed', resolved.workflow);
+    return this.continueAfterAutomaticApproval(moved, resolved.workflow);
+  }
+
+  // Products without manual approval have an "automated approval" step (CREDIT_APPROVED) that nobody acts on;
+  // once the rules have passed and the application reaches it, move straight on to the next configured step.
+  private async continueAfterAutomaticApproval(application: LoanApplication, workflow: WorkflowStepSnapshot[]) {
+    if (application.status !== LoanApplicationStatus.CREDIT_APPROVED) {
+      return application;
+    }
+    const next = this.workflowService.statusAfterCreditApproval(workflow);
+    return this.move(application, next, 'auto_approval', null, 'Approved automatically by product rules', workflow);
   }
 
   async approve(id: string, user: RequestUser, dto: DecisionDto) {
@@ -275,10 +285,19 @@ export class ConfigurableApplicationsService {
       throw new BadRequestException('Application is not waiting for approval');
     }
     const resolved = await this.resolver.resolveForApplication(application);
-    application.approvedAmount = moneyToString(dto.approvedAmount ?? Number(application.requestedAmount ?? application.amount));
+    const requested = Number(application.requestedAmount ?? application.amount);
+    const approved = dto.approvedAmount ?? requested;
+    const minimum = Number(resolved.partnerProduct?.minimumLoanAmount ?? resolved.product.minimumLoanAmount);
+    if (approved > requested) {
+      throw new BadRequestException('Approved amount cannot exceed the requested amount');
+    }
+    if (approved < minimum) {
+      throw new BadRequestException(`Approved amount cannot be below the product minimum of ${minimum}`);
+    }
+    application.approvedAmount = moneyToString(approved);
     application.sanctionedAmount = application.approvedAmount;
-    application.grossDisbursementAmount = application.approvedAmount;
-    application.netDisbursementAmount = subtractMoney(application.approvedAmount, application.upfrontDeductions ?? 0);
+    // EMI, fees and net disbursal must follow the sanctioned amount, not the requested one.
+    Object.assign(application, this.amountDerivedFields(approved, application.tenureMonths, application.annualInterestRate, resolved));
     application.reviewedAt = new Date();
     application.reviewerId = user.id;
     application.adminComment = dto.comments ?? null;

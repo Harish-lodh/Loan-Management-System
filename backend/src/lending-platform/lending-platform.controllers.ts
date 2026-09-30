@@ -10,6 +10,8 @@ import { DocumentsService } from './documents.service';
 import {
   AssignPartnerProductDto,
   CreateApplicationFieldDto,
+  ConfirmDisbursementDto,
+  ConfirmStepDto,
   CreateConfigurableApplicationDto,
   CreateDocumentTemplateDto,
   CreateEligibilityRuleDto,
@@ -285,6 +287,12 @@ export class ConfigurableLoanApplicationsController {
     return this.applications.nextActions(id, user);
   }
 
+  @Get(':id/operations')
+  @Permissions('application.view')
+  operations(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.providers.operationsForApplication(id, user);
+  }
+
   @Post(':id/agreements/generate')
   @Permissions('agreement.generate')
   generateAgreement(@CurrentUser() user: RequestUser, @Param('id') id: string) {
@@ -368,6 +376,12 @@ export class ESignRequestsController {
   status(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.providers.getESignStatus(id, user);
   }
+
+  @Post(':id/confirm')
+  @Permissions('esign.initiate')
+  confirm(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: ConfirmStepDto) {
+    return this.providers.confirmESign(id, user, dto.comments);
+  }
 }
 
 @Controller('api/v1/enach-mandates')
@@ -379,6 +393,12 @@ export class ENachMandatesController {
   @Permissions('application.view')
   status(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.providers.getENachStatus(id, user);
+  }
+
+  @Post(':id/confirm')
+  @Permissions('enach.initiate')
+  confirm(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: ConfirmStepDto) {
+    return this.providers.confirmENach(id, user, dto.comments);
   }
 
   @Post(':id/cancel')
@@ -397,6 +417,12 @@ export class DisbursementsController {
   @Permissions('application.view')
   get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.providers.getDisbursement(id, user);
+  }
+
+  @Post(':id/confirm')
+  @Permissions('disbursement.initiate')
+  confirm(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: ConfirmDisbursementDto) {
+    return this.providers.confirmDisbursement(id, user, dto);
   }
 
   @Post(':id/retry')
