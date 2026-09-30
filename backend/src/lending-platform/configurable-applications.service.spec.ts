@@ -20,7 +20,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
   const ruleEngine = { evaluateRules: jest.fn() };
   const workflowService = { nextCustomerActions: jest.fn(), allowedNextStatuses: jest.fn(), assertTransition: jest.fn(), statusAfterCreditApproval: jest.fn() };
   const auditLogService = { create: jest.fn() };
-  const usersService = { findById: jest.fn(), findCustomerByEmail: jest.fn(), createCustomer: jest.fn() };
+  const customersService = { findActiveForOrganization: jest.fn(), findOrCreateFromApplicant: jest.fn() };
 
   const dependencies = {
     applicationsRepository,
@@ -31,7 +31,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
     ruleEngine,
     workflowService,
     auditLogService,
-    usersService,
+    customersService,
     ...overrides,
   };
 
@@ -45,7 +45,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
       dependencies.ruleEngine as never,
       dependencies.workflowService as never,
       dependencies.auditLogService as never,
-      dependencies.usersService as never,
+      dependencies.customersService as never,
     ),
     dependencies,
   };
@@ -57,7 +57,7 @@ describe('ConfigurableApplicationsService organization scope', () => {
     dependencies.applicationsRepository.findOne.mockResolvedValue({
       id: 'application-2',
       organizationId: 'org-2',
-      userId: 'borrower-2',
+      customerId: 'customer-2',
       status: LoanApplicationStatus.DRAFT,
     });
 
@@ -73,7 +73,23 @@ describe('ConfigurableApplicationsService organization scope', () => {
     expect(dependencies.applicationsRepository.find).toHaveBeenCalledWith({
       where: { organizationId: 'org-1' },
       order: { createdAt: 'DESC' },
-      relations: { user: true },
+      relations: { customer: true },
     });
+  });
+});
+
+describe('ConfigurableApplicationsService maker-checker', () => {
+  it('blocks the staff member who created an application from approving it', async () => {
+    const { service, dependencies } = serviceWith();
+    dependencies.applicationsRepository.findOne.mockResolvedValue({
+      id: 'application-1',
+      organizationId: 'org-1',
+      customerId: 'customer-1',
+      createdById: 'admin-1',
+      status: LoanApplicationStatus.UNDER_REVIEW,
+    });
+
+    await expect(service.approve('application-1', scopedAdmin, {})).rejects.toThrow('Maker-checker');
+    expect(dependencies.resolver.resolveForApplication).not.toHaveBeenCalled();
   });
 });

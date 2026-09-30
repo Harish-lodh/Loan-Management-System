@@ -2,13 +2,12 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { Role } from '../database/entities';
 import { UsersService } from '../users/users.service';
 
 interface JwtPayload {
   sub: string;
   email: string;
-  role: Role;
+  role: string;
   tokenType?: string;
 }
 
@@ -31,7 +30,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const user = await this.usersService.findById(payload.sub);
-    if (!user || !user.isActive || user.role === Role.CUSTOMER) {
+    if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid access token');
     }
     return this.usersService.sanitize(user);

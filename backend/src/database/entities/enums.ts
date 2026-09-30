@@ -1,7 +1,19 @@
+// Staff roles only. Borrowers live in the `customers` table and never sign in.
 export enum Role {
-  USER = 'USER',
+  // Platform vendor. Hidden from NBFC staff lists and cannot be modified by NBFC admins.
+  SUPER_ADMIN = 'SUPER_ADMIN',
+  // NBFC administrator: manages staff, configuration and has full business access.
   ADMIN = 'ADMIN',
-  CUSTOMER = 'CUSTOMER',
+  CREDIT_OFFICER = 'CREDIT_OFFICER',
+  OPERATIONS = 'OPERATIONS',
+  COLLECTIONS = 'COLLECTIONS',
+  VIEWER = 'VIEWER',
+}
+
+export enum CustomerStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  BLOCKED = 'BLOCKED',
 }
 
 export enum MasterStatus {

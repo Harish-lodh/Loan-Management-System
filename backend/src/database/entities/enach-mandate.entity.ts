@@ -16,7 +16,7 @@ import { Loan } from './loan.entity';
 import { Partner } from './partner.entity';
 import { Product } from './product.entity';
 import { ServiceProvider } from './service-provider.entity';
-import { User } from './user.entity';
+import { Customer } from './customer.entity';
 
 @Entity('enach_mandates')
 export class ENachMandate {
@@ -109,9 +109,9 @@ export class ENachMandate {
   @JoinColumn({ name: 'loanId' })
   loan?: Loan | null;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Customer, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'customerId' })
-  customer: User;
+  customer: Customer;
 
   @ManyToOne(() => Partner, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'partnerId' })

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RepaymentStatus, Role } from '../database/entities';
 import { AdminService } from './admin.service';
 
@@ -37,6 +37,7 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
     createQueryBuilder: jest.fn(() => queryBuilder()),
     findOne: jest.fn(),
   };
+  const customersRepository = { count: jest.fn() };
   const userRolesRepository = {
     findOne: jest.fn(),
     save: jest.fn(),
@@ -57,10 +58,12 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
   };
   const loansService = { approveApplication: jest.fn(), rejectApplication: jest.fn() };
   const repaymentsService = { refreshOverdueRepayments: jest.fn(), updateStatusForAdmin: jest.fn() };
-  const usersService = { createStaffUser: jest.fn(), updateStaffUser: jest.fn() };
+  const usersService = { createStaffUser: jest.fn(), updateStaffUser: jest.fn(async (user, dto) => ({ ...user, ...dto })) };
+  const auditLogService = { create: jest.fn() };
 
   const dependencies = {
     usersRepository,
+    customersRepository,
     userRolesRepository,
     applicationsRepository,
     loansRepository,
@@ -68,12 +71,14 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
     loansService,
     repaymentsService,
     usersService,
+    auditLogService,
     ...overrides,
   };
 
   return {
     service: new AdminService(
       dependencies.usersRepository as never,
+      dependencies.customersRepository as never,
       dependencies.userRolesRepository as never,
       dependencies.applicationsRepository as never,
       dependencies.loansRepository as never,
@@ -81,22 +86,45 @@ function serviceWith(overrides: Record<string, unknown> = {}) {
       dependencies.loansService as never,
       dependencies.repaymentsService as never,
       dependencies.usersService as never,
+      dependencies.auditLogService as never,
     ),
     dependencies,
   };
 }
 
 describe('AdminService tenant isolation', () => {
-  it('scopes user details to the authenticated organization', async () => {
+  it('scopes staff lookups to the authenticated organization', async () => {
     const { service, dependencies } = serviceWith();
     dependencies.usersRepository.findOne.mockResolvedValue(null);
 
-    await expect(service.userDetails(scopedAdmin, 'user-2')).rejects.toBeInstanceOf(NotFoundException);
-    expect(dependencies.usersRepository.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'user-2', organizationId: 'org-1', role: Role.CUSTOMER },
-      }),
-    );
+    await expect(service.updateStaffUser(scopedAdmin, 'user-2', { isActive: false })).rejects.toBeInstanceOf(NotFoundException);
+    expect(dependencies.usersRepository.findOne).toHaveBeenCalledWith({ where: { id: 'user-2', organizationId: 'org-1' } });
+  });
+
+  it('hides the SUPER_ADMIN account from NBFC admins', async () => {
+    const { service, dependencies } = serviceWith();
+    dependencies.usersRepository.findOne.mockResolvedValue({ id: 'vendor-1', role: Role.SUPER_ADMIN, organizationId: 'org-1' });
+
+    await expect(service.updateStaffUser(scopedAdmin, 'vendor-1', { isActive: false })).rejects.toBeInstanceOf(NotFoundException);
+    expect(dependencies.usersService.updateStaffUser).not.toHaveBeenCalled();
+  });
+
+  it('excludes the SUPER_ADMIN from staff lists for NBFC admins', async () => {
+    const builder = queryBuilder();
+    const { service } = serviceWith({
+      usersRepository: { count: jest.fn(), createQueryBuilder: jest.fn(() => builder), findOne: jest.fn() },
+    });
+
+    await service.staffUsers(scopedAdmin, { page: 1, limit: 10 });
+
+    expect(builder.andWhere).toHaveBeenCalledWith('user.role != :superAdmin', { superAdmin: Role.SUPER_ADMIN });
+  });
+
+  it('prevents admins from deactivating their own account', async () => {
+    const { service, dependencies } = serviceWith();
+    dependencies.usersRepository.findOne.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN, organizationId: 'org-1' });
+
+    await expect(service.updateStaffUser(scopedAdmin, 'admin-1', { isActive: false })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('adds organization filtering to admin application lists', async () => {

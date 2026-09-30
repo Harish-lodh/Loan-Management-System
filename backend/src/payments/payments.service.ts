@@ -5,6 +5,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { assertOrganizationAccess } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
+  Customer,
   Loan,
   LoanStatus,
   MasterStatus,
@@ -18,7 +19,6 @@ import {
   RepaymentLedgerTransactionType,
   RepaymentStatus,
   ServiceProvider,
-  User,
 } from '../database/entities';
 import { roundMoney } from '../loans/loan-calculations';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -35,8 +35,8 @@ export class PaymentsService {
     private readonly repaymentsRepository: Repository<Repayment>,
     @InjectRepository(Loan)
     private readonly loansRepository: Repository<Loan>,
-    @InjectRepository(User)
-    private readonly usersRepository: Repository<User>,
+    @InjectRepository(Customer)
+    private readonly customersRepository: Repository<Customer>,
     @InjectRepository(ServiceProvider)
     private readonly providersRepository: Repository<ServiceProvider>,
     @InjectDataSource()
@@ -64,7 +64,7 @@ export class PaymentsService {
       return existing;
     }
 
-    const customer = await this.usersRepository.findOne({ where: { id: repayment.userId } });
+    const customer = await this.customersRepository.findOne({ where: { id: repayment.customerId } });
     if (!customer) {
       throw new NotFoundException('Customer not found for this repayment');
     }
@@ -76,8 +76,8 @@ export class PaymentsService {
       {
         referenceId,
         amount,
-        customerName: customer.name,
-        customerEmail: customer.email,
+        customerName: customer.fullName,
+        customerEmail: customer.email ?? '',
         customerPhone: customer.phone,
         purpose: `EMI due ${repayment.dueDate.toDateString()}`,
       },
@@ -223,12 +223,16 @@ export class PaymentsService {
         }),
       );
 
-      await this.notificationsService.create({
-        userId: repayment.userId,
-        title: 'Repayment received',
-        message: `We received your EMI payment of ${repayment.emiAmount.toFixed(2)} via ${providerCode}.`,
-        type: NotificationType.REPAYMENT_RECEIVED,
-      });
+      // Tell the staff member who sent the payment link that the EMI has been collected.
+      if (savedRequest.createdBy) {
+        await this.notificationsService.create({
+          userId: savedRequest.createdBy,
+          title: 'EMI received',
+          message: `EMI of ${repayment.emiAmount.toFixed(2)} for loan ${loan.loanAccountNumber ?? loan.id} was collected via ${providerCode}.`,
+          type: NotificationType.REPAYMENT_RECEIVED,
+          actionUrl: '/admin/repayments',
+        });
+      }
       await this.auditLogService.create({
         action: 'PAYMENT_COLLECTION_COMPLETED',
         entityType: 'PaymentCollectionRequest',

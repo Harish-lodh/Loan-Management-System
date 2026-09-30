@@ -11,8 +11,9 @@ import {
 } from 'typeorm';
 import { EmploymentType, LoanApplicationStatus } from './enums';
 import { ApplicationConfigurationSnapshot } from './application-configuration-snapshot.entity';
+import { MONEY_COLUMN, RATE_COLUMN } from '../transformers/decimal.transformer';
+import { Customer } from './customer.entity';
 import { Loan } from './loan.entity';
-import { User } from './user.entity';
 
 @Entity('loan_applications')
 export class LoanApplication {
@@ -21,7 +22,12 @@ export class LoanApplication {
 
   @Index()
   @Column()
-  userId: string;
+  customerId: string;
+
+  // Staff user who captured the application (maker). Used for maker-checker on approval.
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  createdById?: string | null;
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 40, nullable: true })
@@ -47,7 +53,7 @@ export class LoanApplication {
   @Column({ type: 'varchar', length: 36, nullable: true })
   configurationSnapshotId?: string | null;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   amount: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
@@ -71,13 +77,13 @@ export class LoanApplication {
   @Column({ type: 'int' })
   tenureMonths: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   monthlyIncome: number;
 
   @Column({ type: 'enum', enum: EmploymentType })
   employmentType: EmploymentType;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   existingMonthlyDebt: number;
 
   @Column({ type: 'int' })
@@ -102,16 +108,16 @@ export class LoanApplication {
   @Column({ type: 'json', nullable: true })
   scoreBreakdown?: Record<string, unknown>[] | null;
 
-  @Column({ type: 'double', default: 12 })
+  @Column({ ...RATE_COLUMN, default: 12 })
   annualInterestRate: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   emi: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   totalPayable: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   totalInterest: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
@@ -165,9 +171,9 @@ export class LoanApplication {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @ManyToOne(() => User, (user) => user.loanApplications, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => Customer, (customer) => customer.loanApplications, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'customerId' })
+  customer: Customer;
 
   @OneToOne(() => Loan, (loan) => loan.application)
   loan?: Loan;

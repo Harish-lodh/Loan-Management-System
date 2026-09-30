@@ -9,11 +9,9 @@ import {
 } from 'typeorm';
 import { AuditLog } from './audit-log.entity';
 import { Role } from './enums';
-import { LoanApplication } from './loan-application.entity';
-import { Loan } from './loan.entity';
 import { Notification } from './notification.entity';
-import { Repayment } from './repayment.entity';
 
+// Staff accounts only (NBFC employees and the platform vendor). Borrowers are `Customer` records.
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -38,9 +36,6 @@ export class User {
   @Column({ type: 'varchar', length: 80, nullable: true })
   occupation?: string | null;
 
-  @Column({ type: 'double', nullable: true })
-  annualIncome?: number | null;
-
   @Column({ type: 'text', nullable: true, select: false })
   refreshTokenHash?: string | null;
 
@@ -50,12 +45,13 @@ export class User {
   @Column({ type: 'datetime', nullable: true })
   lastLoginAt?: Date | null;
 
+  // Null only for SUPER_ADMIN, which is not tied to a single NBFC.
   @Index()
   @Column({ type: 'varchar', length: 36, nullable: true })
   organizationId?: string | null;
 
   @Index()
-  @Column({ type: 'enum', enum: Role, default: Role.USER })
+  @Column({ type: 'enum', enum: Role, default: Role.VIEWER })
   role: Role;
 
   @Column({ default: true })
@@ -69,15 +65,6 @@ export class User {
 
   @UpdateDateColumn()
   updatedAt: Date;
-
-  @OneToMany(() => LoanApplication, (application) => application.user)
-  loanApplications: LoanApplication[];
-
-  @OneToMany(() => Loan, (loan) => loan.user)
-  loans: Loan[];
-
-  @OneToMany(() => Repayment, (repayment) => repayment.user)
-  repayments: Repayment[];
 
   @OneToMany(() => Notification, (notification) => notification.user)
   notifications: Notification[];

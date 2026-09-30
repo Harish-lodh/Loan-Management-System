@@ -4,7 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { DATABASE_ENTITIES } from '../database/entities';
-import { UsersModule } from '../users/users.module';
+import { CustomersModule } from '../customers/customers.module';
 import { ConfigurableApplicationsService } from './configurable-applications.service';
 import { ConfigurationResolverService } from './configuration-resolver.service';
 import { DigioProvider } from './esign-providers/digio.provider';
@@ -30,7 +30,7 @@ import { RuleEngineService } from './rule-engine.service';
 import { WorkflowService } from './workflow.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature(DATABASE_ENTITIES), AuditLogModule, UsersModule, HttpModule],
+  imports: [TypeOrmModule.forFeature(DATABASE_ENTITIES), AuditLogModule, CustomersModule, HttpModule],
   controllers: [
     OrganizationsController,
     ProductsController,

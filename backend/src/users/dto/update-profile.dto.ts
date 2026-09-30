@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsNumber, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { IsOptional, IsString, Length, Matches } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -27,10 +27,4 @@ export class UpdateProfileDto {
   @IsString()
   @Length(0, 80)
   occupation?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100000000)
-  annualIncome?: number;
 }

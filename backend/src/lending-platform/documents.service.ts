@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { IsNull, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { assertPermission } from '../common/auth/role-permissions';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
   DocumentTemplate,
@@ -12,7 +13,6 @@ import {
   GeneratedDocument,
   LoanApplication,
   LoanApplicationStatus,
-  Role,
 } from '../database/entities';
 import { ConfigurationResolverService } from './configuration-resolver.service';
 import { CreateDocumentTemplateDto, PreviewTemplateDto } from './dto';
@@ -52,7 +52,7 @@ export class DocumentsService {
   ) {}
 
   async createTemplate(dto: CreateDocumentTemplateDto, user: RequestUser) {
-    this.ensureAdmin(user);
+    assertPermission(user, 'agreement.template.manage');
     const organizationId = resolveOrganizationForCreate(user, dto.organizationId, 'document template');
     const sanitized = this.sanitizeHtml(dto.templateHtml);
     const placeholders = this.extractPlaceholders(sanitized);
@@ -116,7 +116,7 @@ export class DocumentsService {
   }
 
   async publishTemplate(id: string, user: RequestUser) {
-    this.ensureAdmin(user);
+    assertPermission(user, 'agreement.template.manage');
     const template = await this.getTemplate(id, user);
     template.status = DocumentTemplateStatus.PUBLISHED;
     template.updatedBy = user.id;
@@ -138,7 +138,7 @@ export class DocumentsService {
   }
 
   async cloneTemplate(id: string, user: RequestUser) {
-    this.ensureAdmin(user);
+    assertPermission(user, 'agreement.template.manage');
     const template = await this.getTemplate(id, user);
     const clone = await this.templatesRepository.save(
       this.templatesRepository.create({
@@ -155,8 +155,8 @@ export class DocumentsService {
   }
 
   async generateAgreement(applicationId: string, user: RequestUser) {
-    this.ensureAdmin(user);
-    const application = await this.applicationsRepository.findOne({ where: { id: applicationId }, relations: { user: true } });
+    assertPermission(user, 'agreement.generate');
+    const application = await this.applicationsRepository.findOne({ where: { id: applicationId }, relations: { customer: true } });
     if (!application) {
       throw new NotFoundException('Loan application not found');
     }
@@ -177,8 +177,10 @@ export class DocumentsService {
     });
     const html = this.render(template.templateHtml, {
       customer: {
-        fullName: application.user?.name ?? 'Customer',
-        address: application.user?.address ?? '',
+        fullName: application.customer?.fullName ?? 'Customer',
+        address: [application.customer?.addressLine, application.customer?.city, application.customer?.state, application.customer?.pincode]
+          .filter(Boolean)
+          .join(', '),
       },
       loan: {
         applicationNumber: application.applicationNumber ?? application.id,
@@ -339,9 +341,4 @@ export class DocumentsService {
       .replaceAll("'", '&#039;');
   }
 
-  private ensureAdmin(user: RequestUser) {
-    if (user.role !== Role.ADMIN) {
-      throw new BadRequestException('Admin access is required');
-    }
-  }
 }

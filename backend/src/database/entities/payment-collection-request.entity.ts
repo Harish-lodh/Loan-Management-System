@@ -15,7 +15,7 @@ import { PaymentCollectionStatusHistory } from './payment-collection-status-hist
 import { Partner } from './partner.entity';
 import { Repayment } from './repayment.entity';
 import { ServiceProvider } from './service-provider.entity';
-import { User } from './user.entity';
+import { Customer } from './customer.entity';
 
 @Entity('payment_collection_requests')
 export class PaymentCollectionRequest {
@@ -97,9 +97,9 @@ export class PaymentCollectionRequest {
   @JoinColumn({ name: 'repaymentId' })
   repayment?: Repayment | null;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Customer, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'customerId' })
-  customer: User;
+  customer: Customer;
 
   @ManyToOne(() => Partner, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'partnerId' })

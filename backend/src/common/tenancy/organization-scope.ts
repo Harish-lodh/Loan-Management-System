@@ -4,11 +4,12 @@ import { Role } from '../../database/entities';
 
 type OrganizationScopedUser = Pick<RequestUser, 'organizationId' | 'role'>;
 
+// Returns the organization a user is confined to, or null for the platform SUPER_ADMIN (sees every organization).
 export function organizationScope(user: OrganizationScopedUser): string | null {
   if (user.organizationId) {
     return user.organizationId;
   }
-  if (user.role === Role.ADMIN) {
+  if (user.role === Role.SUPER_ADMIN) {
     return null;
   }
   throw new ForbiddenException('User is not associated with an organization');

@@ -2,31 +2,30 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
 import { Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { AssignableStaffRole } from '../common/auth/role-permissions';
 import { NotificationType, Role, User } from '../database/entities';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 export type SafeUser = Omit<User, 'password' | 'refreshTokenHash'>;
-type CreateUserInput = Pick<User, 'name' | 'email' | 'phone' | 'password' | 'role'>;
 
 interface CreateStaffUserInput {
   name: string;
   email: string;
   phone: string;
   password: string;
-  role: Role.USER | Role.ADMIN;
+  role: AssignableStaffRole;
   organizationId?: string | null;
 }
 
-interface CreateCustomerInput {
-  name: string;
-  email: string;
-  phone: string;
-  organizationId: string;
+interface UpdateStaffUserInput {
+  name?: string;
+  phone?: string;
+  role?: AssignableStaffRole;
+  isActive?: boolean;
 }
 
 @Injectable()
@@ -42,11 +41,6 @@ export class UsersService {
   sanitize(user: User): SafeUser {
     const { password: _password, refreshTokenHash: _refreshTokenHash, ...safeUser } = user;
     return safeUser;
-  }
-
-  async create(data: CreateUserInput): Promise<SafeUser> {
-    const user = await this.usersRepository.save(this.usersRepository.create(data));
-    return this.sanitize(user);
   }
 
   async createStaffUser(data: CreateStaffUserInput): Promise<SafeUser> {
@@ -69,35 +63,11 @@ export class UsersService {
     return this.sanitize(user);
   }
 
-  async updateStaffUser(id: string, dto: { name?: string; phone?: string; role?: Role.USER | Role.ADMIN; isActive?: boolean }): Promise<SafeUser> {
-    const user = await this.findById(id);
-    if (!user || user.role === Role.CUSTOMER) {
-      throw new NotFoundException('Staff user not found');
-    }
+  // Callers must already have checked organization scope and SUPER_ADMIN protection (see AdminService).
+  async updateStaffUser(user: User, dto: UpdateStaffUserInput): Promise<SafeUser> {
     Object.assign(user, dto);
     const saved = await this.usersRepository.save(user);
     return this.sanitize(saved);
-  }
-
-  findCustomerByEmail(email: string, organizationId: string) {
-    return this.usersRepository.findOne({
-      where: { email: email.toLowerCase(), organizationId, role: Role.CUSTOMER },
-    });
-  }
-
-  async createCustomer(data: CreateCustomerInput): Promise<User> {
-    const saltRounds = Number(this.config.get<string>('BCRYPT_SALT_ROUNDS') ?? 12);
-    const unusablePassword = await bcrypt.hash(randomBytes(32).toString('hex'), saltRounds);
-    return this.usersRepository.save(
-      this.usersRepository.create({
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
-        password: unusablePassword,
-        role: Role.CUSTOMER,
-        organizationId: data.organizationId,
-      }),
-    );
   }
 
   findByEmail(email: string) {
@@ -153,7 +123,6 @@ export class UsersService {
       ...dto,
       address: dto.address === '' ? null : dto.address,
       occupation: dto.occupation === '' ? null : dto.occupation,
-      annualIncome: dto.annualIncome ?? user.annualIncome,
     });
     const saved = await this.usersRepository.save(user);
 

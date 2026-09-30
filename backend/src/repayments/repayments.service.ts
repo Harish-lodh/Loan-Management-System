@@ -1,16 +1,17 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, LessThan, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { assertOrganizationAccess } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
-import { Loan, LoanStatus, NotificationType, Repayment, RepaymentStatus } from '../database/entities';
+import { Loan, LoanStatus, Repayment, RepaymentStatus } from '../database/entities';
 import { roundMoney } from '../loans/loan-calculations';
-import { NotificationsService } from '../notifications/notifications.service';
-import { calculateDaysOverdue, shouldSendOverdueReminder } from './repayment-utils';
+import { calculateDaysOverdue } from './repayment-utils';
 
 @Injectable()
 export class RepaymentsService {
+  private readonly logger = new Logger(RepaymentsService.name);
+
   constructor(
     @InjectRepository(Repayment)
     private readonly repaymentsRepository: Repository<Repayment>,
@@ -18,55 +19,8 @@ export class RepaymentsService {
     private readonly loansRepository: Repository<Loan>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
-    private readonly notificationsService: NotificationsService,
     private readonly auditLogService: AuditLogService,
   ) {}
-
-  async findMine(userId: string) {
-    await this.refreshOverdueRepayments();
-    return this.repaymentsRepository.find({
-      where: { userId },
-      order: { dueDate: 'ASC' },
-      relations: { loan: true },
-    });
-  }
-
-  async markPaid(repaymentId: string, userId: string) {
-    const repayment = await this.repaymentsRepository.findOne({
-      where: { id: repaymentId },
-      relations: { loan: true },
-    });
-    if (!repayment) {
-      throw new NotFoundException('Repayment not found');
-    }
-    if (repayment.userId !== userId) {
-      throw new ForbiddenException('You cannot update this repayment');
-    }
-    if (repayment.status === RepaymentStatus.PAID) {
-      return repayment;
-    }
-
-    const result = await this.markRepaymentPaid(repayment, userId);
-    await this.notificationsService.create(
-      repayment.userId,
-      'Repayment received',
-      `We received your EMI payment of ${repayment.emiAmount.toFixed(2)}.`,
-      NotificationType.REPAYMENT_RECEIVED,
-    );
-    await this.auditLogService.create({
-      action: 'REPAYMENT_MARKED_PAID',
-      entityType: 'Repayment',
-      entityId: repayment.id,
-      actorUserId: userId,
-      metadata: {
-        loanId: repayment.loanId,
-        amount: repayment.emiAmount,
-        status: RepaymentStatus.PAID,
-      },
-    });
-
-    return result;
-  }
 
   async updateStatusForAdmin(repaymentId: string, status: RepaymentStatus, adminUser: RequestUser) {
     const repayment = await this.repaymentsRepository.findOne({
@@ -129,19 +83,6 @@ export class RepaymentsService {
       repayment.daysOverdue = calculateDaysOverdue(repayment.dueDate, now);
       repayment.overdueMarkedAt = repayment.overdueMarkedAt ?? now;
 
-      if (wasPending || shouldSendOverdueReminder(repayment.lastReminderAt, now)) {
-        repayment.lastReminderAt = now;
-        await this.notificationsService.create({
-          userId: repayment.userId,
-          title: wasPending ? 'Payment overdue' : 'Overdue payment reminder',
-          message: `Your EMI due on ${repayment.dueDate.toDateString()} is ${repayment.daysOverdue} day(s) overdue.`,
-          type: NotificationType.PAYMENT_OVERDUE,
-          priority: 'HIGH',
-          actionUrl: '/repayments',
-          metadata: { repaymentId: repayment.id, loanId: repayment.loanId, daysOverdue: repayment.daysOverdue },
-        });
-      }
-
       await this.repaymentsRepository.save(repayment);
 
       if (wasPending) {
@@ -156,6 +97,9 @@ export class RepaymentsService {
       }
     }
 
+    if (newlyOverdue) {
+      this.logger.log(`Marked ${newlyOverdue} repayment(s) as overdue`);
+    }
     return newlyOverdue;
   }
 

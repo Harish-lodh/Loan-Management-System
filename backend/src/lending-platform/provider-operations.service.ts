@@ -4,6 +4,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
+  Customer,
   Disbursement,
   DisbursementStatus,
   DisbursementStatusHistory,
@@ -24,7 +25,6 @@ import {
   RepaymentLedgerEntry,
   RepaymentLedgerTransactionType,
   ServiceProvider,
-  User,
 } from '../database/entities';
 import { generateRepaymentSchedule } from '../loans/loan-calculations';
 import { ConfigurationResolverService } from './configuration-resolver.service';
@@ -63,8 +63,8 @@ export class ProviderOperationsService {
     private readonly repaymentsRepository: Repository<Repayment>,
     @InjectRepository(RepaymentLedgerEntry)
     private readonly ledgerRepository: Repository<RepaymentLedgerEntry>,
-    @InjectRepository(User)
-    private readonly usersRepository: Repository<User>,
+    @InjectRepository(Customer)
+    private readonly customersRepository: Repository<Customer>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly resolver: ConfigurationResolverService,
@@ -94,15 +94,15 @@ export class ProviderOperationsService {
     const provider = await this.provider(resolved.product.organizationId, ProviderType.ESIGN, resolved.partnerProduct?.esignProviderId ?? null);
     const referenceId = `ESIGN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const adapter = this.esignProviders.resolve(provider?.providerCode);
-    const customer = await this.usersRepository.findOneOrFail({ where: { id: application.userId } });
+    const customer = await this.customersRepository.findOneOrFail({ where: { id: application.customerId } });
     const documentPdfBase64 = adapter.isMock ? '' : await this.documentsService.renderToPdfBase64(agreement.id, user);
     const signingRequest = await adapter.createSigningRequest(
       {
         referenceId,
         documentPdfBase64,
         fileName: agreement.fileName,
-        signerName: customer.name,
-        signerEmail: customer.email,
+        signerName: customer.fullName,
+        signerEmail: customer.email ?? '',
         signerPhone: customer.phone,
       },
       provider,
@@ -112,7 +112,7 @@ export class ProviderOperationsService {
       this.esignRepository.create({
         organizationId: resolved.product.organizationId,
         loanApplicationId: application.id,
-        customerId: application.userId,
+        customerId: application.customerId,
         partnerId: application.partnerId,
         productId: application.productId,
         providerId: provider?.id ?? null,
@@ -162,7 +162,7 @@ export class ProviderOperationsService {
       this.enachRepository.create({
         organizationId: resolved.product.organizationId,
         loanApplicationId: application.id,
-        customerId: application.userId,
+        customerId: application.customerId,
         partnerId: application.partnerId,
         productId: application.productId,
         providerId: provider?.id ?? null,
@@ -227,7 +227,7 @@ export class ProviderOperationsService {
       this.disbursementsRepository.create({
         organizationId: resolved.product.organizationId,
         loanApplicationId: application.id,
-        customerId: application.userId,
+        customerId: application.customerId,
         partnerId: application.partnerId,
         productId: application.productId,
         providerId: provider?.id ?? null,
@@ -379,7 +379,7 @@ export class ProviderOperationsService {
         startDate,
       });
       const loan = await manager.save(Loan, manager.create(Loan, {
-        userId: application.userId,
+        customerId: application.customerId,
         applicationId: application.id,
         loanAccountNumber: `LAN${Date.now()}`,
         organizationId: application.organizationId,
@@ -414,7 +414,7 @@ export class ProviderOperationsService {
 
       const repayments = schedule.map((item) => manager.create(Repayment, {
         loanId: loan.id,
-        userId: application.userId,
+        customerId: application.customerId,
         dueDate: item.dueDate,
         emiAmount: item.emiAmount,
         principalComponent: item.principalComponent,

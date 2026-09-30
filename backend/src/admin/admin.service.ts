@@ -1,10 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { ASSIGNABLE_STAFF_ROLES, isSuperAdmin } from '../common/auth/role-permissions';
 import { paginationMeta } from '../common/dto/pagination-query.dto';
 import { organizationScope } from '../common/tenancy/organization-scope';
 import { RequestUser } from '../common/types/request-user.interface';
 import {
+  Customer,
   Loan,
   LoanApplication,
   LoanApplicationStatus,
@@ -26,6 +29,8 @@ export class AdminService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(Customer)
+    private readonly customersRepository: Repository<Customer>,
     @InjectRepository(UserRole)
     private readonly userRolesRepository: Repository<UserRole>,
     @InjectRepository(LoanApplication)
@@ -37,14 +42,13 @@ export class AdminService {
     private readonly loansService: LoansService,
     private readonly repaymentsService: RepaymentsService,
     private readonly usersService: UsersService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async dashboard(user: RequestUser) {
     const organizationId = organizationScope(user);
-    await this.repaymentsService.refreshOverdueRepayments();
-
     const [
-      totalUsers,
+      totalCustomers,
       totalLoanApplications,
       approvedLoans,
       rejectedLoans,
@@ -60,7 +64,7 @@ export class AdminService {
       applicationsByStatus,
       riskDistribution,
     ] = await Promise.all([
-      this.usersRepository.count({ where: this.organizationWhere(organizationId, { role: Role.CUSTOMER }) }),
+      this.customersRepository.count({ where: this.organizationWhere(organizationId) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.APPROVED }) }),
       this.applicationsRepository.count({ where: this.organizationWhere(organizationId, { status: LoanApplicationStatus.REJECTED }) }),
@@ -87,7 +91,7 @@ export class AdminService {
 
     return {
       summary: {
-        totalUsers,
+        totalCustomers,
         totalLoanApplications,
         approvedLoans,
         rejectedLoans,
@@ -113,60 +117,13 @@ export class AdminService {
     };
   }
 
-  async users(user: RequestUser, query: AdminUsersQueryDto) {
-    const organizationId = organizationScope(user);
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const builder = this.usersRepository.createQueryBuilder('user').where('user.role = :role', { role: Role.CUSTOMER });
-
-    if (organizationId) {
-      builder.andWhere('user.organizationId = :organizationId', { organizationId });
-    }
-
-    if (query.search) {
-      builder.andWhere('(user.name LIKE :search OR user.email LIKE :search OR user.phone LIKE :search)', {
-        search: `%${query.search}%`,
-      });
-    }
-
-    const [users, total] = await builder
-      .orderBy('user.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
-
-    return { items: users.map((user) => this.sanitizeUser(user)), meta: paginationMeta(total, page, limit) };
-  }
-
-  async userDetails(user: RequestUser, id: string) {
-    const organizationId = organizationScope(user);
-    const targetUser = await this.usersRepository.findOne({
-      where: this.organizationWhere(organizationId, { id, role: Role.CUSTOMER }),
-      relations: {
-        loanApplications: true,
-        loans: { repayments: true },
-        repayments: true,
-      },
-    });
-    if (!targetUser) {
-      throw new NotFoundException('User not found');
-    }
-
-    return {
-      ...this.sanitizeUser(targetUser),
-      loanApplications: targetUser.loanApplications,
-      loans: targetUser.loans,
-      repayments: targetUser.repayments,
-    };
-  }
-
   async loanApplications(user: RequestUser, query: AdminLoanApplicationsQueryDto) {
     const organizationId = organizationScope(user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const builder = this.applicationsRepository
       .createQueryBuilder('application')
-      .leftJoinAndSelect('application.user', 'user')
+      .leftJoinAndSelect('application.customer', 'customer')
       .leftJoinAndSelect('application.loan', 'loan');
 
     if (organizationId) {
@@ -179,7 +136,7 @@ export class AdminService {
 
     if (query.search) {
       builder.andWhere(
-        '(user.name LIKE :search OR user.email LIKE :search OR application.purpose LIKE :search OR application.id LIKE :search)',
+        '(customer.fullName LIKE :search OR customer.phone LIKE :search OR customer.customerNumber LIKE :search OR application.applicationNumber LIKE :search OR application.purpose LIKE :search)',
         { search: `%${query.search}%` },
       );
     }
@@ -191,10 +148,7 @@ export class AdminService {
       .getManyAndCount();
 
     return {
-      items: applications.map((application) => ({
-        ...application,
-        user: this.sanitizeUser(application.user),
-      })),
+      items: applications,
       meta: paginationMeta(total, page, limit),
     };
   }
@@ -203,15 +157,12 @@ export class AdminService {
     const organizationId = organizationScope(user);
     const application = await this.applicationsRepository.findOne({
       where: this.organizationWhere(organizationId, { id }),
-      relations: { user: true, loan: { repayments: true } },
+      relations: { customer: true, loan: { repayments: true } },
     });
     if (!application) {
       throw new NotFoundException('Loan application not found');
     }
-    return {
-      ...application,
-      user: this.sanitizeUser(application.user),
-    };
+    return application;
   }
 
   approveLoanApplication(id: string, adminUser: RequestUser, comment?: string) {
@@ -224,12 +175,11 @@ export class AdminService {
 
   async repayments(user: RequestUser, query: AdminRepaymentsQueryDto) {
     const organizationId = organizationScope(user);
-    await this.repaymentsService.refreshOverdueRepayments();
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const builder = this.repaymentsRepository
       .createQueryBuilder('repayment')
-      .leftJoinAndSelect('repayment.user', 'user')
+      .leftJoinAndSelect('repayment.customer', 'customer')
       .leftJoinAndSelect('repayment.loan', 'loan');
 
     if (organizationId) {
@@ -241,7 +191,7 @@ export class AdminService {
     }
 
     if (query.search) {
-      builder.andWhere('(user.name LIKE :search OR user.email LIKE :search OR loan.id LIKE :search)', {
+      builder.andWhere('(customer.fullName LIKE :search OR customer.phone LIKE :search OR customer.customerNumber LIKE :search OR loan.loanAccountNumber LIKE :search)', {
         search: `%${query.search}%`,
       });
     }
@@ -253,10 +203,7 @@ export class AdminService {
       .getManyAndCount();
 
     return {
-      items: repayments.map((repayment) => ({
-        ...repayment,
-        user: this.sanitizeUser(repayment.user),
-      })),
+      items: repayments,
       meta: paginationMeta(total, page, limit),
     };
   }
@@ -409,7 +356,7 @@ export class AdminService {
   }
 
   private sanitizeUser(user: User): SafeUser {
-    const { password: _password, ...safeUser } = user;
+    const { password: _password, refreshTokenHash: _refreshTokenHash, ...safeUser } = user;
     return safeUser;
   }
 
@@ -417,12 +364,14 @@ export class AdminService {
     const organizationId = organizationScope(user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const builder = this.usersRepository
-      .createQueryBuilder('user')
-      .where('user.role IN (:...roles)', { roles: [Role.USER, Role.ADMIN] });
+    const builder = this.usersRepository.createQueryBuilder('user');
 
     if (organizationId) {
       builder.andWhere('user.organizationId = :organizationId', { organizationId });
+    }
+    // The vendor account is invisible to NBFC staff.
+    if (!isSuperAdmin(user)) {
+      builder.andWhere('user.role != :superAdmin', { superAdmin: Role.SUPER_ADMIN });
     }
 
     if (query.search) {
@@ -440,33 +389,67 @@ export class AdminService {
     return { items: users.map((staffUser) => this.sanitizeUser(staffUser)), meta: paginationMeta(total, page, limit) };
   }
 
-  createStaffUser(user: RequestUser, dto: CreateStaffUserDto) {
+  async createStaffUser(user: RequestUser, dto: CreateStaffUserDto) {
     const organizationId = organizationScope(user) ?? dto.organizationId ?? null;
-    return this.usersService.createStaffUser({ ...dto, organizationId });
+    if (!organizationId) {
+      throw new BadRequestException('organizationId is required for staff accounts');
+    }
+    if (!ASSIGNABLE_STAFF_ROLES.includes(dto.role)) {
+      throw new ForbiddenException('This role cannot be assigned');
+    }
+    const created = await this.usersService.createStaffUser({ ...dto, organizationId });
+    await this.auditLogService.create({
+      action: 'STAFF_USER_CREATED',
+      entityType: 'User',
+      entityId: created.id,
+      actorUserId: user.id,
+      metadata: { organizationId, role: created.role, email: created.email },
+    });
+    return created;
   }
 
-  updateStaffUser(user: RequestUser, id: string, dto: UpdateStaffUserDto) {
-    return this.usersService.updateStaffUser(id, dto);
+  async updateStaffUser(user: RequestUser, id: string, dto: UpdateStaffUserDto) {
+    const target = await this.findManageableStaffUser(user, id);
+    if (target.id === user.id && (dto.isActive === false || (dto.role && dto.role !== target.role))) {
+      throw new BadRequestException('You cannot deactivate or change the role of your own account');
+    }
+    const updated = await this.usersService.updateStaffUser(target, dto);
+    await this.auditLogService.create({
+      action: 'STAFF_USER_UPDATED',
+      entityType: 'User',
+      entityId: target.id,
+      actorUserId: user.id,
+      metadata: { organizationId: target.organizationId ?? null, fields: Object.keys(dto), role: updated.role, isActive: updated.isActive },
+    });
+    return updated;
   }
 
   async assignStaffRole(user: RequestUser, id: string, dto: AssignStaffRoleDto) {
-    const staffUser = await this.usersRepository.findOne({ where: { id } });
-    if (!staffUser || staffUser.role === Role.CUSTOMER) {
-      throw new NotFoundException('Staff user not found');
-    }
+    await this.findManageableStaffUser(user, id);
+    const organizationId = organizationScope(user) ?? dto.organizationId;
     const existing = await this.userRolesRepository.findOne({
-      where: { userId: id, organizationId: dto.organizationId, roleName: dto.roleName },
+      where: { userId: id, organizationId, roleName: dto.roleName },
     });
     if (existing) {
       return existing;
     }
-    return this.userRolesRepository.save(
-      this.userRolesRepository.create({ userId: id, organizationId: dto.organizationId, roleName: dto.roleName }),
-    );
+    return this.userRolesRepository.save(this.userRolesRepository.create({ userId: id, organizationId, roleName: dto.roleName }));
   }
 
-  async removeStaffRole(id: string, organizationId: string, roleName: string) {
-    await this.userRolesRepository.delete({ userId: id, organizationId, roleName });
+  async removeStaffRole(user: RequestUser, id: string, organizationId: string, roleName: string) {
+    await this.findManageableStaffUser(user, id);
+    await this.userRolesRepository.delete({ userId: id, organizationId: organizationScope(user) ?? organizationId, roleName });
     return { message: 'Role assignment removed' };
+  }
+
+  // NBFC admins can only manage staff in their own organization, and never the SUPER_ADMIN.
+  // A 404 (not 403) is returned so the vendor account's existence is not revealed.
+  private async findManageableStaffUser(user: RequestUser, id: string) {
+    const organizationId = organizationScope(user);
+    const target = await this.usersRepository.findOne({ where: organizationId ? { id, organizationId } : { id } });
+    if (!target || (target.role === Role.SUPER_ADMIN && !isSuperAdmin(user))) {
+      throw new NotFoundException('Staff user not found');
+    }
+    return target;
   }
 }

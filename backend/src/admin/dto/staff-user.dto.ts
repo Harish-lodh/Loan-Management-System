@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
-import { Role } from '../../database/entities';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
+import { ASSIGNABLE_STAFF_ROLES, AssignableStaffRole } from '../../common/auth/role-permissions';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -26,8 +26,8 @@ export class CreateStaffUserDto {
   })
   password: string;
 
-  @IsEnum([Role.USER, Role.ADMIN])
-  role: Role.USER | Role.ADMIN;
+  @IsIn(ASSIGNABLE_STAFF_ROLES)
+  role: AssignableStaffRole;
 
   @IsOptional()
   @IsString()
@@ -48,8 +48,8 @@ export class UpdateStaffUserDto {
   phone?: string;
 
   @IsOptional()
-  @IsEnum([Role.USER, Role.ADMIN])
-  role?: Role.USER | Role.ADMIN;
+  @IsIn(ASSIGNABLE_STAFF_ROLES)
+  role?: AssignableStaffRole;
 
   @IsOptional()
   @IsBoolean()

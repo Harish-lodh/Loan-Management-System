@@ -4,13 +4,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import {
+  Customer,
   Loan,
   PaymentCollectionRequest,
   PaymentCollectionStatusHistory,
   Repayment,
   RolePermission,
   ServiceProvider,
-  User,
   UserRole,
 } from '../database/entities';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -25,7 +25,7 @@ import { EasebuzzProvider } from './providers/easebuzz.provider';
       PaymentCollectionStatusHistory,
       Repayment,
       Loan,
-      User,
+      Customer,
       ServiceProvider,
       UserRole,
       RolePermission,

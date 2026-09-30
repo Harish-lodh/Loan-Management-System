@@ -9,8 +9,9 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { RepaymentStatus } from './enums';
+import { MONEY_COLUMN } from '../transformers/decimal.transformer';
+import { Customer } from './customer.entity';
 import { Loan } from './loan.entity';
-import { User } from './user.entity';
 
 @Entity('repayments')
 export class Repayment {
@@ -23,22 +24,22 @@ export class Repayment {
 
   @Index()
   @Column()
-  userId: string;
+  customerId: string;
 
   @Index()
   @Column({ type: 'datetime' })
   dueDate: Date;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   emiAmount: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   principalComponent: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   interestComponent: number;
 
-  @Column({ type: 'double', default: 0 })
+  @Column({ ...MONEY_COLUMN, default: 0 })
   paidAmount: number;
 
   @Index()
@@ -67,7 +68,7 @@ export class Repayment {
   @JoinColumn({ name: 'loanId' })
   loan: Loan;
 
-  @ManyToOne(() => User, (user) => user.repayments, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => Customer, (customer) => customer.repayments, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'customerId' })
+  customer: Customer;
 }

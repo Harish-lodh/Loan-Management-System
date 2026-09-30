@@ -47,7 +47,8 @@ export class AuditLog {
   @Column({ length: 64 })
   currentHash: string;
 
-  @ManyToOne(() => User, (user) => user.auditLogs, { nullable: true, onDelete: 'SET NULL' })
+  // No database FK: audit rows are immutable and must survive user deletion without changing their hash input.
+  @ManyToOne(() => User, (user) => user.auditLogs, { nullable: true, createForeignKeyConstraints: false })
   @JoinColumn({ name: 'actorUserId' })
   actor?: User | null;
 }

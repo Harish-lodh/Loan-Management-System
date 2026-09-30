@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { effectivePermissions } from '../common/auth/role-permissions';
 import { Role } from '../database/entities/enums';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
@@ -35,7 +36,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    if (user.role === Role.CUSTOMER || !user.isActive) {
+    if (!user.isActive) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
@@ -95,14 +96,14 @@ export class AuthService {
     return { message: 'Logged out successfully' };
   }
 
-  private async issueSession(user: { id: string; email: string; role: Role; name: string; phone: string }) {
+  private async issueSession(user: { id: string; email: string; role: Role; name: string; phone: string; permissions?: string[] | null }) {
     const accessToken = this.signAccessToken(user.id, user.email, user.role);
     const refreshToken = this.signRefreshToken(user.id, user.email, user.role);
     const refreshTokenHash = await bcrypt.hash(refreshToken, Number(this.config.get<string>('BCRYPT_SALT_ROUNDS') ?? 12));
     await this.usersService.setRefreshToken(user.id, refreshTokenHash, this.refreshExpiryDate());
 
     return {
-      user,
+      user: { ...user, effectivePermissions: effectivePermissions(user) },
       accessToken,
       refreshToken,
     };

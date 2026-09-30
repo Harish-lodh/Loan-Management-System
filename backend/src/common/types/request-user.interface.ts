@@ -7,7 +7,6 @@ export interface RequestUser {
   phone: string;
   address?: string | null;
   occupation?: string | null;
-  annualIncome?: number | null;
   organizationId?: string | null;
   role: Role;
   permissions?: string[] | null;

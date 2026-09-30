@@ -13,6 +13,7 @@ import { ESignStatusHistory } from './esign-status-history.entity';
 import { GeneratedDocument } from './generated-document.entity';
 import { IdempotencyRecord } from './idempotency-record.entity';
 import { LoanApplication } from './loan-application.entity';
+import { Customer } from './customer.entity';
 import { Loan } from './loan.entity';
 import { Notification } from './notification.entity';
 import { Organization } from './organization.entity';
@@ -41,6 +42,7 @@ export * from './application-configuration-snapshot.entity';
 export * from './application-status-transition.entity';
 export * from './audit-log.entity';
 export * from './customer-consent.entity';
+export * from './customer.entity';
 export * from './disbursement-status-history.entity';
 export * from './disbursement.entity';
 export * from './document-template-version.entity';
@@ -81,6 +83,7 @@ export const DATABASE_ENTITIES = [
   ApplicationConfigurationSnapshot,
   ApplicationStatusTransition,
   AuditLog,
+  Customer,
   CustomerConsent,
   DisbursementStatusHistory,
   Disbursement,

@@ -12,8 +12,9 @@ import {
 } from 'typeorm';
 import { LoanStatus } from './enums';
 import { LoanApplication } from './loan-application.entity';
+import { MONEY_COLUMN, RATE_COLUMN } from '../transformers/decimal.transformer';
+import { Customer } from './customer.entity';
 import { Repayment } from './repayment.entity';
-import { User } from './user.entity';
 
 @Entity('loans')
 export class Loan {
@@ -22,7 +23,7 @@ export class Loan {
 
   @Index()
   @Column()
-  userId: string;
+  customerId: string;
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 40, nullable: true })
@@ -44,7 +45,7 @@ export class Loan {
   @Column()
   applicationId: string;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   principal: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
@@ -53,19 +54,19 @@ export class Loan {
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
   disbursedAmount?: string | null;
 
-  @Column({ type: 'double' })
+  @Column(RATE_COLUMN)
   annualInterestRate: number;
 
   @Column({ type: 'int' })
   tenureMonths: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   emi: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   totalPayable: number;
 
-  @Column({ type: 'double' })
+  @Column(MONEY_COLUMN)
   outstandingBalance: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
@@ -114,9 +115,9 @@ export class Loan {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @ManyToOne(() => User, (user) => user.loans, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => Customer, (customer) => customer.loans, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'customerId' })
+  customer: Customer;
 
   @OneToOne(() => LoanApplication, (application) => application.loan, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'applicationId' })

@@ -2,7 +2,9 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { assertPermission } from '../common/auth/role-permissions';
 import { RequestUser } from '../common/types/request-user.interface';
+import { CustomersService } from '../customers/customers.service';
 import {
   ApplicationConfigurationSnapshot,
   ApplicationStatusTransition,
@@ -11,10 +13,8 @@ import {
   LoanApplication,
   LoanApplicationStatus,
   MasterStatus,
-  Role,
 } from '../database/entities';
 import { assessLoanRisk, calculateEmi } from '../loans/loan-calculations';
-import { UsersService } from '../users/users.service';
 import { ConfigurationResolverService, ResolvedConfiguration } from './configuration-resolver.service';
 import { CreateConfigurableApplicationDto, DecisionDto, UpdateConfigurableApplicationDto } from './dto';
 import { moneyToString, percentageOf, subtractMoney } from './money.util';
@@ -37,14 +37,14 @@ export class ConfigurableApplicationsService {
     private readonly ruleEngine: RuleEngineService,
     private readonly workflowService: WorkflowService,
     private readonly auditLogService: AuditLogService,
-    private readonly usersService: UsersService,
+    private readonly customersService: CustomersService,
   ) {}
 
   async createDraft(user: RequestUser, dto: CreateConfigurableApplicationDto) {
     const resolved = await this.resolver.resolveLive(dto.productId, dto.partnerId, organizationScope(user));
     this.ensureActiveProduct(resolved);
     this.validateApplicationInput(dto, resolved);
-    const customer = await this.resolveCustomer(dto, resolved.product.organizationId);
+    const customer = await this.resolveCustomer(user, dto, resolved.product.organizationId);
     const applicant = this.normalizeApplicant(dto.applicant);
     const pricing = this.pricing(dto.requestedAmount, resolved);
     const emi = calculateEmi({
@@ -63,7 +63,8 @@ export class ConfigurableApplicationsService {
 
     const application = await this.applicationsRepository.save(
       this.applicationsRepository.create({
-        userId: customer.id,
+        customerId: customer.id,
+        createdById: user.id,
         applicationNumber: this.applicationNumber(),
         organizationId: resolved.product.organizationId,
         partnerId: resolved.partner?.id ?? null,
@@ -246,9 +247,7 @@ export class ConfigurableApplicationsService {
   async advanceOperationalStep(id: string, user: RequestUser, comments?: string) {
     const application = await this.getApplication(id);
     assertOrganizationAccess(user, application.organizationId, 'application');
-    if (user.role !== Role.ADMIN) {
-      throw new ForbiddenException('Only operations users can complete operational workflow steps');
-    }
+    assertPermission(user, 'application.review');
     const allowedManualStatuses = [
       LoanApplicationStatus.KYC_PENDING,
       LoanApplicationStatus.DOCUMENT_PENDING,
@@ -270,9 +269,8 @@ export class ConfigurableApplicationsService {
   async approve(id: string, user: RequestUser, dto: DecisionDto) {
     const application = await this.getApplication(id);
     assertOrganizationAccess(user, application.organizationId, 'application');
-    if (user.role !== Role.ADMIN) {
-      throw new ForbiddenException('Only admins can approve applications');
-    }
+    assertPermission(user, 'application.approve');
+    this.assertMakerChecker(application, user);
     if (![LoanApplicationStatus.UNDER_REVIEW, LoanApplicationStatus.IN_REVIEW, LoanApplicationStatus.SUBMITTED].includes(application.status)) {
       throw new BadRequestException('Application is not waiting for approval');
     }
@@ -292,9 +290,7 @@ export class ConfigurableApplicationsService {
   async reject(id: string, user: RequestUser, dto: DecisionDto) {
     const application = await this.getApplication(id);
     assertOrganizationAccess(user, application.organizationId, 'application');
-    if (user.role !== Role.ADMIN) {
-      throw new ForbiddenException('Only admins can reject applications');
-    }
+    assertPermission(user, 'application.reject');
     application.reviewedAt = new Date();
     application.reviewerId = user.id;
     application.adminComment = dto.comments ?? null;
@@ -318,7 +314,7 @@ export class ConfigurableApplicationsService {
     return this.applicationsRepository.find({
       where: organizationScopedWhere(user),
       order: { createdAt: 'DESC' },
-      relations: { user: true },
+      relations: { customer: true },
     });
   }
 
@@ -461,25 +457,21 @@ export class ConfigurableApplicationsService {
     };
   }
 
-  private async resolveCustomer(dto: CreateConfigurableApplicationDto, organizationId: string) {
+  private async resolveCustomer(user: RequestUser, dto: CreateConfigurableApplicationDto, organizationId: string) {
     if (dto.customerId) {
-      const customer = await this.usersService.findById(dto.customerId);
-      if (!customer || customer.role !== Role.CUSTOMER || customer.organizationId !== organizationId) {
-        throw new BadRequestException('customerId does not reference a valid customer in this organization');
-      }
-      return customer;
+      return this.customersService.findActiveForOrganization(dto.customerId, organizationId);
     }
-    const { fullName, email, phone } = dto.applicant;
-    if (!fullName || !email || !phone) {
-      throw new BadRequestException(
-        'Provide an existing customerId, or applicant.fullName, applicant.email and applicant.phone to create a new customer',
-      );
+    return this.customersService.findOrCreateFromApplicant(user, dto.applicant, organizationId);
+  }
+
+  // RBI expects segregation of duties: the staff member who captured an application cannot approve it.
+  private assertMakerChecker(application: LoanApplication, user: RequestUser) {
+    if (process.env.MAKER_CHECKER_ENABLED === 'false') {
+      return;
     }
-    const existing = await this.usersService.findCustomerByEmail(email, organizationId);
-    if (existing) {
-      return existing;
+    if (application.createdById && application.createdById === user.id) {
+      throw new ForbiddenException('Maker-checker: the staff member who created this application cannot approve it');
     }
-    return this.usersService.createCustomer({ name: fullName, email, phone, organizationId });
   }
 
   private normalizeApplicant(input: CreateConfigurableApplicationDto['applicant']) {
@@ -505,7 +497,7 @@ export class ConfigurableApplicationsService {
   }
 
   private async getApplication(id: string) {
-    const application = await this.applicationsRepository.findOne({ where: { id }, relations: { user: true } });
+    const application = await this.applicationsRepository.findOne({ where: { id }, relations: { customer: true } });
     if (!application) {
       throw new NotFoundException('Loan application not found');
     }

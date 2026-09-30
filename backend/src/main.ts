@@ -10,8 +10,10 @@ async function bootstrap() {
   const config = app.get(ConfigService);
 
   app.use(helmet());
+  // Comma-separated list of allowed origins. Unset means allow all (local development only).
+  const corsOrigins = config.get<string>('CORS_ORIGINS');
   app.enableCors({
-    origin: "*",
+    origin: corsOrigins ? corsOrigins.split(',').map((origin) => origin.trim()) : true,
     credentials: true,
   });
   app.useGlobalPipes(

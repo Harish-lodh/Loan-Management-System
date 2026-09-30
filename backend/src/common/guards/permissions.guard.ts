@@ -2,7 +2,8 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Unauthor
 import { Reflector } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Permission, Role, RolePermission, UserRole } from '../../database/entities';
+import { Permission, RolePermission, UserRole } from '../../database/entities';
+import { hasPermissions } from '../auth/role-permissions';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 import { RequestUser } from '../types/request-user.interface';
 
@@ -30,18 +31,13 @@ export class PermissionsGuard implements CanActivate {
     if (!user) {
       throw new UnauthorizedException('Authentication is required');
     }
-    if (user.role === Role.ADMIN) {
+
+    // Built-in role permissions plus any per-user grants.
+    if (hasPermissions(user, requiredPermissions)) {
       return true;
     }
 
-    const directPermissions = new Set([
-      ...(user.permissions ?? []),
-      ...(user.role === Role.USER ? ['product.view', 'application.create', 'application.view'] : []),
-    ]);
-    if (requiredPermissions.every((permission) => directPermissions.has(permission))) {
-      return true;
-    }
-
+    // Optional custom roles configured in the database (user_roles -> role_permissions).
     const userRoles = await this.userRolesRepository.find({ where: { userId: user.id } });
     if (!userRoles.length) {
       throw new ForbiddenException('You do not have permission to access this resource');
@@ -51,8 +47,11 @@ export class PermissionsGuard implements CanActivate {
       .leftJoinAndMapOne('rolePermission.permission', Permission, 'permission', 'permission.id = rolePermission.permissionId')
       .where('rolePermission.roleName IN (:...roleNames)', { roleNames: userRoles.map((role) => role.roleName) })
       .getMany();
-    const allowed = new Set(rolePermissions.map((rolePermission) => rolePermission.permission?.code).filter(Boolean));
-    if (!requiredPermissions.every((permission) => allowed.has(permission))) {
+    const allowed = new Set([
+      ...rolePermissions.map((rolePermission) => rolePermission.permission?.code).filter(Boolean),
+      ...(user.permissions ?? []),
+    ]);
+    if (!requiredPermissions.every((permission) => allowed.has(permission) || hasPermissions(user, [permission]))) {
       throw new ForbiddenException('You do not have permission to access this resource');
     }
 

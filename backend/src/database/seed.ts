@@ -1,12 +1,20 @@
-import * as bcrypt from 'bcrypt';
 import dataSource from './data-source';
 import {
-  AuditLog,
+  createAuditLog,
+  ensureStaffUser,
+  seedDefaultProviders,
+  seedPermissionCatalogue,
+  upsertOrganization,
+} from './bootstrap/tenant-bootstrap';
+import {
   ApplicationFieldType,
+  Customer,
+  CustomerStatus,
   DocumentTemplate,
   DocumentTemplateStatus,
   DocumentTemplateVersion,
   DocumentType,
+  EmploymentType,
   FeeType,
   InterestCalculationMethod,
   InterestType,
@@ -16,7 +24,6 @@ import {
   Partner,
   PartnerProduct,
   PartnerType,
-  Permission,
   Product,
   ProductApplicationField,
   ProductEligibilityRule,
@@ -24,183 +31,33 @@ import {
   ProductVersion,
   ProductWorkflowDefinition,
   ProductWorkflowStep,
-  ProviderType,
   RepaymentFrequency,
   Role,
-  RolePermission,
   ServiceProvider,
   TenureUnit,
-  UserRole,
-  User,
 } from './entities';
 import { calculateAuditHash } from '../audit-log/audit-hash.util';
+import { encryptPii, hashPii, maskPan } from '../common/crypto/pii.util';
 import { moneyToString, rateToString } from '../lending-platform/money.util';
 
-async function createAuditLog(input: {
-  action: string;
-  entityType: string;
-  entityId: string;
-  actorUserId?: string | null;
-  metadata?: Record<string, unknown>;
-}) {
-  const auditRepository = dataSource.getRepository(AuditLog);
-  const latest = await auditRepository
-    .createQueryBuilder('auditLog')
-    .orderBy('auditLog.sequence', 'DESC')
-    .getOne();
-  const timestamp = new Date();
-  const metadata = input.metadata ?? {};
-  const previousHash = latest?.currentHash ?? null;
-  const currentHash = calculateAuditHash({
-    ...input,
-    timestamp,
-    metadata,
-    previousHash,
-  });
+// Local demo data. Production instances are onboarded with `npm run tenant:init` instead.
 
-  await auditRepository.save(
-    auditRepository.create({
-      ...input,
-      timestamp,
-      metadata,
-      previousHash,
-      currentHash,
-    }),
-  );
-}
+type DemoCustomerInput = Pick<
+  Customer,
+  'customerNumber' | 'fullName' | 'email' | 'phone' | 'addressLine' | 'city' | 'state' | 'pincode' | 'occupation' | 'employmentType' | 'monthlyIncome'
+> & { pan: string };
 
-async function upsertUser(
-  data: Pick<User, 'name' | 'email' | 'phone' | 'role'> &
-    Partial<Pick<User, 'address' | 'occupation' | 'annualIncome'>> & { password: string },
-) {
-  const userRepository = dataSource.getRepository(User);
-  const existing = await userRepository.findOne({ where: { email: data.email } });
-  const password = await bcrypt.hash(data.password, Number(process.env.BCRYPT_SALT_ROUNDS ?? 12));
-
-  if (existing) {
-    existing.name = data.name;
-    existing.phone = data.phone;
-    existing.role = data.role;
-    existing.address = data.address ?? existing.address;
-    existing.occupation = data.occupation ?? existing.occupation;
-    existing.annualIncome = data.annualIncome ?? existing.annualIncome;
-    existing.password = password;
-    return userRepository.save(existing);
-  }
-
-  const user = await userRepository.save(
-    userRepository.create({
-      ...data,
-      password,
-    }),
-  );
-  await createAuditLog({
-    action: 'USER_REGISTERED',
-    entityType: 'User',
-    entityId: user.id,
-    actorUserId: user.id,
-    metadata: { email: user.email, role: user.role, seeded: true },
-  });
-  return user;
-}
-
-async function upsertOrganization() {
-  const repository = dataSource.getRepository(Organization);
-  const existing = await repository.findOne({ where: { organizationCode: 'FTLEND' } });
+async function upsertDemoCustomer(organization: Organization, data: DemoCustomerInput) {
+  const repository = dataSource.getRepository(Customer);
+  const { pan, ...profile } = data;
+  const existing = await repository.findOne({ where: { customerNumber: data.customerNumber } });
   const payload = {
-    organizationCode: 'FTLEND',
-    name: 'Fintree Lending',
-    legalName: 'Fintree Financial Services Private Limited',
-    cin: 'U65990KA2026PTC000001',
-    rbiRegistrationNumber: 'RBI-LENDING-DEMO-001',
-    pan: 'ABCDE1234F',
-    gstin: '29ABCDE1234F1Z5',
-    registeredAddress: 'Bengaluru, Karnataka',
-    supportDetails: { email: 'support@demo.bank', phone: '+91 90000 00000' },
-    defaultCurrency: 'INR',
-    timeZone: 'Asia/Kolkata',
-    status: MasterStatus.ACTIVE,
-    authorizedSignatory: { name: 'Demo Signatory', designation: 'Authorized Officer' },
-    bankConfiguration: { disbursementAccountMasked: 'XXXXXX4321', ifsc: 'DEMO0001234' },
-  };
-  if (existing) {
-    Object.assign(existing, payload);
-    return repository.save(existing);
-  }
-  return repository.save(repository.create(payload));
-}
-
-async function seedPermissions(organization: Organization, admin: User) {
-  const permissionRepository = dataSource.getRepository(Permission);
-  const rolePermissionRepository = dataSource.getRepository(RolePermission);
-  const userRoleRepository = dataSource.getRepository(UserRole);
-  const codes = [
-    'organization.create',
-    'organization.view',
-    'organization.update',
-    'product.create',
-    'product.view',
-    'product.update',
-    'product.publish',
-    'partner.create',
-    'partner.view',
-    'partner.update',
-    'provider.configure',
-    'provider.view',
-    'application.create',
-    'application.view',
-    'application.review',
-    'application.approve',
-    'application.reject',
-    'agreement.generate',
-    'agreement.template.manage',
-    'agreement.template.view',
-    'esign.initiate',
-    'enach.initiate',
-    'disbursement.initiate',
-    'payment.collect',
-    'staff.manage',
-    'audit.view',
-  ];
-
-  for (const code of codes) {
-    let permission = await permissionRepository.findOne({ where: { code } });
-    if (!permission) {
-      permission = await permissionRepository.save(permissionRepository.create({ code, description: code.replaceAll('.', ' ') }));
-    }
-    const existingRolePermission = await rolePermissionRepository.findOne({
-      where: { roleName: 'LENDING_ADMIN', permissionId: permission.id },
-    });
-    if (!existingRolePermission) {
-      await rolePermissionRepository.save(rolePermissionRepository.create({ roleName: 'LENDING_ADMIN', permissionId: permission.id }));
-    }
-  }
-
-  const existingUserRole = await userRoleRepository.findOne({
-    where: { userId: admin.id, organizationId: organization.id, roleName: 'LENDING_ADMIN' },
-  });
-  if (!existingUserRole) {
-    await userRoleRepository.save(
-      userRoleRepository.create({ userId: admin.id, organizationId: organization.id, roleName: 'LENDING_ADMIN' }),
-    );
-  }
-}
-
-async function upsertProvider(organization: Organization, providerCode: string, providerName: string, providerType: ProviderType) {
-  const repository = dataSource.getRepository(ServiceProvider);
-  const existing = await repository.findOne({ where: { organizationId: organization.id, providerCode } });
-  const payload = {
+    ...profile,
     organizationId: organization.id,
-    providerCode,
-    providerName,
-    providerType,
-    status: MasterStatus.ACTIVE,
-    isSandbox: true,
-    baseUrl: 'https://mock-provider.local',
-    credentialReference: `${providerCode}_CREDENTIAL_REF`,
-    webhookSecretReference: `mock-${providerCode}`,
-    supportedCapabilities: ['initiate', 'webhook', 'status'],
-    configuration: { mock: true },
+    status: CustomerStatus.ACTIVE,
+    panMasked: maskPan(pan),
+    panHash: hashPii(pan),
+    panEncrypted: encryptPii(pan),
   };
   if (existing) {
     Object.assign(existing, payload);
@@ -546,29 +403,33 @@ async function upsertAgreementTemplate(organization: Organization, product: Prod
 async function seed() {
   await dataSource.initialize();
 
-  const admin = await upsertUser({
-    name: 'Demo Admin',
-    email: 'admin@demo.bank',
-    phone: '+91 90000 00001',
-    password: 'Admin@12345',
-    role: Role.ADMIN,
-    occupation: 'Loan operations manager',
+  const organization = await upsertOrganization(dataSource, {
+    organizationCode: 'FTLEND',
+    name: 'Fintree Lending',
+    legalName: 'Fintree Financial Services Private Limited',
+    cin: 'U65990KA2026PTC000001',
+    rbiRegistrationNumber: 'RBI-LENDING-DEMO-001',
+    pan: 'ABCDE1234F',
+    gstin: '29ABCDE1234F1Z5',
+    registeredAddress: 'Bengaluru, Karnataka',
+    supportDetails: { email: 'support@demo.bank', phone: '+91 90000 00000' },
+    authorizedSignatory: { name: 'Demo Signatory', designation: 'Authorized Officer' },
+    bankConfiguration: { disbursementAccountMasked: 'XXXXXX4321', ifsc: 'DEMO0001234' },
   });
-  const organization = await upsertOrganization();
-  await dataSource.getRepository(User).update(admin.id, { organizationId: organization.id });
-  await seedPermissions(organization, admin);
+  await seedPermissionCatalogue(dataSource);
 
-  const esignProvider = await upsertProvider(organization, 'MOCK_ESIGN', 'Mock eSign Provider', ProviderType.ESIGN);
-  const enachProvider = await upsertProvider(organization, 'MOCK_ENACH', 'Mock eNACH Provider', ProviderType.ENACH);
-  const disbursementProvider = await upsertProvider(
-    organization,
-    'MOCK_DISBURSEMENT',
-    'Mock Disbursement Provider',
-    ProviderType.DISBURSEMENT,
-  );
-  await upsertProvider(organization, 'EASEBUZZ', 'Easebuzz', ProviderType.PAYMENT_GATEWAY);
-  await upsertProvider(organization, 'DIGIO', 'Digio', ProviderType.ESIGN);
-  await upsertProvider(organization, 'DOQUFY', 'Doqufy', ProviderType.ESIGN);
+  const staff = [
+    { name: 'Platform Support', email: 'superadmin@demo.bank', phone: '+91 90000 00009', password: 'Super@12345', role: Role.SUPER_ADMIN, organizationId: null },
+    { name: 'Demo Admin', email: 'admin@demo.bank', phone: '+91 90000 00001', password: 'Admin@12345', role: Role.ADMIN, organizationId: organization.id },
+    { name: 'Credit Officer', email: 'credit@demo.bank', phone: '+91 90000 00005', password: 'Credit@12345', role: Role.CREDIT_OFFICER, organizationId: organization.id },
+    { name: 'Ops Staff', email: 'staff@demo.bank', phone: '+91 90000 00004', password: 'Staff@12345', role: Role.OPERATIONS, organizationId: organization.id },
+    { name: 'Collections Agent', email: 'collections@demo.bank', phone: '+91 90000 00006', password: 'Collect@12345', role: Role.COLLECTIONS, organizationId: organization.id },
+  ];
+  for (const member of staff) {
+    await ensureStaffUser(dataSource, member, { resetPassword: true });
+  }
+
+  const providers = await seedDefaultProviders(dataSource, organization);
 
   const personalLoan = await upsertProduct(organization, {
     productCode: 'PERSONAL_LOAN',
@@ -614,7 +475,6 @@ async function seed() {
   });
   const lendingPartner = await upsertPartner(organization, 'LEND_DEFAULT', 'Default Lending Partner', PartnerType.LENDING_PARTNER);
   const dsaPartner = await upsertPartner(organization, 'GROWTH_DSA', 'Growth DSA Partner', PartnerType.DSA);
-  const providers = { esign: esignProvider, enach: enachProvider, disbursement: disbursementProvider };
   await assignPartnerProduct(lendingPartner, personalLoan.product, personalLoan.version, providers);
   await assignPartnerProduct(lendingPartner, salaryAdvance.product, salaryAdvance.version, providers);
   await assignPartnerProduct(dsaPartner, merchantLoan.product, merchantLoan.version, providers);
@@ -622,45 +482,41 @@ async function seed() {
   await upsertAgreementTemplate(organization, salaryAdvance.product);
   await upsertAgreementTemplate(organization, merchantLoan.product);
 
-  const staff = await upsertUser({
-    name: 'Ops Staff',
-    email: 'staff@demo.bank',
-    phone: '+91 90000 00004',
-    password: 'Staff@12345',
-    role: Role.USER,
-    occupation: 'Loan operations executive',
-  });
-  await dataSource.getRepository(User).update(staff.id, { organizationId: organization.id });
-
-  const maya = await upsertUser({
-    name: 'Maya Sharma',
+  await upsertDemoCustomer(organization, {
+    customerNumber: 'CUSDEMO0001',
+    fullName: 'Maya Sharma',
     email: 'maya@example.com',
     phone: '+91 90000 00002',
-    password: 'User@12345',
-    role: Role.CUSTOMER,
-    address: 'Indiranagar, Bengaluru',
+    pan: 'ABCPM1234K',
+    addressLine: 'Indiranagar',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    pincode: '560038',
     occupation: 'Product designer',
-    annualIncome: 1020000,
+    employmentType: EmploymentType.SALARIED,
+    monthlyIncome: 85000,
   });
-  await dataSource.getRepository(User).update(maya.id, { organizationId: organization.id });
-  const arjun = await upsertUser({
-    name: 'Arjun Mehta',
+  await upsertDemoCustomer(organization, {
+    customerNumber: 'CUSDEMO0002',
+    fullName: 'Arjun Mehta',
     email: 'arjun@example.com',
     phone: '+91 90000 00003',
-    password: 'User@12345',
-    role: Role.CUSTOMER,
-    address: 'Andheri West, Mumbai',
+    pan: 'BCDPM5678L',
+    addressLine: 'Andheri West',
+    city: 'Mumbai',
+    state: 'Maharashtra',
+    pincode: '400053',
     occupation: 'Freelance consultant',
-    annualIncome: 744000,
+    employmentType: EmploymentType.SELF_EMPLOYED,
+    monthlyIncome: 62000,
   });
-  await dataSource.getRepository(User).update(arjun.id, { organizationId: organization.id });
 
-  await createAuditLog({
+  await createAuditLog(dataSource, {
     action: 'SEED_COMPLETED',
-    entityType: 'User',
-    entityId: admin.id,
-    actorUserId: admin.id,
-    metadata: { staffUsers: 2, customers: 2, products: 3, partners: 2, providers: 6 },
+    entityType: 'Organization',
+    entityId: organization.id,
+    actorUserId: null,
+    metadata: { staffUsers: staff.length, customers: 2, products: 3, partners: 2, providers: 6 },
   });
 
   await dataSource.destroy();

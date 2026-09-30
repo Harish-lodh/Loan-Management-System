@@ -1,7 +1,7 @@
 import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { ConsentType } from './enums';
 import { LoanApplication } from './loan-application.entity';
-import { User } from './user.entity';
+import { Customer } from './customer.entity';
 
 @Entity('customer_consents')
 @Index(['customerId', 'loanApplicationId', 'consentType', 'consentVersion'], { unique: true })
@@ -47,9 +47,9 @@ export class CustomerConsent {
   @CreateDateColumn()
   createdAt: Date;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Customer, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'customerId' })
-  customer: User;
+  customer: Customer;
 
   @ManyToOne(() => LoanApplication, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'loanApplicationId' })

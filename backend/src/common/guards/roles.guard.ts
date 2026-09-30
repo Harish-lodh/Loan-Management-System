@@ -24,7 +24,7 @@ export class RolesGuard implements CanActivate {
       throw new UnauthorizedException('Authentication is required');
     }
 
-    if (!requiredRoles.includes(user.role)) {
+    if (user.role !== Role.SUPER_ADMIN && !requiredRoles.includes(user.role)) {
       throw new ForbiddenException('You do not have permission to access this resource');
     }
 

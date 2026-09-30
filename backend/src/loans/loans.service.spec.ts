@@ -1,114 +1,76 @@
 import { ForbiddenException } from '@nestjs/common';
-import { EmploymentType, LoanApplicationStatus, Role } from '../database/entities';
+import { LoanApplicationStatus, Role } from '../database/entities';
 import { LoansService } from './loans.service';
 
-const scopedUser = {
-  id: 'user-1',
-  name: 'Borrower',
-  email: 'borrower@org1.test',
+const creditOfficer = {
+  id: 'credit-1',
+  name: 'Credit Officer',
+  email: 'credit@org1.test',
   phone: '9999999999',
   organizationId: 'org-1',
-  role: Role.USER,
+  role: Role.CREDIT_OFFICER,
 };
 
-const scopedAdmin = {
-  id: 'admin-1',
-  name: 'Org Admin',
-  email: 'admin@org1.test',
-  phone: '9999999999',
-  organizationId: 'org-1',
-  role: Role.ADMIN,
-};
-
-const draftDto = {
-  amount: 100000,
-  tenureMonths: 12,
-  monthlyIncome: 80000,
-  employmentType: EmploymentType.SALARIED,
-  existingMonthlyDebt: 5000,
-  creditScore: 760,
-  purpose: 'Working capital',
-};
-
-function serviceWith(overrides: Record<string, unknown> = {}) {
+function serviceWith() {
   const applicationsRepository = {
     create: jest.fn((input) => input),
-    save: jest.fn(async (input) => ({ id: 'application-1', ...input })),
+    save: jest.fn(async (input) => input),
     findOne: jest.fn(),
   };
-  const loansRepository = { findOne: jest.fn(), find: jest.fn() };
-  const repaymentsRepository = { find: jest.fn(), findOne: jest.fn() };
-  const notificationsRepository = { count: jest.fn() };
   const dataSource = { transaction: jest.fn() };
-  const config = { get: jest.fn((key: string) => (key === 'ANNUAL_INTEREST_RATE' ? '12' : undefined)) };
-  const notificationsService = { create: jest.fn() };
   const auditLogService = { create: jest.fn() };
 
-  const dependencies = {
-    applicationsRepository,
-    loansRepository,
-    repaymentsRepository,
-    notificationsRepository,
-    dataSource,
-    config,
-    notificationsService,
-    auditLogService,
-    ...overrides,
-  };
-
   return {
-    service: new LoansService(
-      dependencies.applicationsRepository as never,
-      dependencies.loansRepository as never,
-      dependencies.repaymentsRepository as never,
-      dependencies.notificationsRepository as never,
-      dependencies.dataSource as never,
-      dependencies.config as never,
-      dependencies.notificationsService as never,
-      dependencies.auditLogService as never,
-    ),
-    dependencies,
+    service: new LoansService(applicationsRepository as never, dataSource as never, auditLogService as never),
+    dependencies: { applicationsRepository, dataSource, auditLogService },
   };
 }
 
-describe('LoansService tenant isolation', () => {
-  it('stores the authenticated organization on legacy loan drafts', async () => {
+function inReviewApplication(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'application-1',
+    customerId: 'customer-1',
+    organizationId: 'org-1',
+    createdById: 'ops-1',
+    status: LoanApplicationStatus.IN_REVIEW,
+    loan: null,
+    ...overrides,
+  };
+}
+
+describe('LoansService', () => {
+  it('rejects approval of another organization application', async () => {
     const { service, dependencies } = serviceWith();
+    dependencies.applicationsRepository.findOne.mockResolvedValue(inReviewApplication({ organizationId: 'org-2' }));
 
-    await service.saveDraft(scopedUser, draftDto);
-
-    expect(dependencies.applicationsRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        organizationId: 'org-1',
-      }),
-    );
-    expect(dependencies.auditLogService.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.objectContaining({ organizationId: 'org-1' }),
-      }),
-    );
+    await expect(service.approveApplication('application-1', creditOfficer, 'ok')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(dependencies.dataSource.transaction).not.toHaveBeenCalled();
   });
 
-  it('rejects legacy loan creation when a borrower has no organization context', async () => {
-    const { service } = serviceWith();
+  it('enforces maker-checker: the creator cannot approve their own application', async () => {
+    const { service, dependencies } = serviceWith();
+    dependencies.applicationsRepository.findOne.mockResolvedValue(inReviewApplication({ createdById: 'credit-1' }));
+
+    await expect(service.approveApplication('application-1', creditOfficer, 'ok')).rejects.toThrow('Maker-checker');
+    expect(dependencies.dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not let roles without approval rights approve', async () => {
+    const { service, dependencies } = serviceWith();
+    dependencies.applicationsRepository.findOne.mockResolvedValue(inReviewApplication());
 
     await expect(
-      service.saveDraft({ ...scopedUser, organizationId: null }, draftDto),
+      service.approveApplication('application-1', { ...creditOfficer, id: 'viewer-1', role: Role.VIEWER }, 'ok'),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('rejects approval of another organization application', async () => {
+  it('lets a different staff member reject the application', async () => {
     const { service, dependencies } = serviceWith();
-    dependencies.applicationsRepository.findOne.mockResolvedValue({
-      id: 'application-2',
-      userId: 'borrower-2',
-      organizationId: 'org-2',
-      status: LoanApplicationStatus.IN_REVIEW,
-      loan: null,
-    });
+    dependencies.applicationsRepository.findOne.mockResolvedValue(inReviewApplication());
 
-    await expect(service.approveApplication('application-2', scopedAdmin, 'ok')).rejects.toBeInstanceOf(ForbiddenException);
-    expect(dependencies.dataSource.transaction).not.toHaveBeenCalled();
+    const result = await service.rejectApplication('application-1', creditOfficer, 'Income not verified');
+
+    expect(result.status).toBe(LoanApplicationStatus.REJECTED);
+    expect(result.reviewerId).toBe('credit-1');
   });
 });
