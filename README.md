@@ -1,40 +1,40 @@
 # Loan Management Platform
 
-A portfolio-ready loan management web app for a small digital banking platform. It includes a NestJS REST API, MySQL with TypeORM migrations, JWT access and refresh tokens, role-based admin access, profile management, transparent loan scoring, EMI calculations, draft-to-review loan workflows, repayment tracking with overdue handling, notifications, admin analytics, Swagger docs, and a tamper-evident audit log.
+A staff-operated loan management system for NBFCs. Each NBFC gets its own instance (own database, own
+subdomain); borrowers are customer records managed by NBFC staff and never sign in.
 
-The platform now includes a configurable lending-platform foundation: organization, product, partner, provider, product-version, dynamic application field, eligibility rule, workflow, agreement template, mock eSign, mock eNACH, mock disbursement, provider webhook, application snapshot, status transition, and repayment ledger records. Legacy `/loans/*` routes remain available, while configurable APIs use `/api/v1/*`.
+It includes a NestJS REST API, MySQL with TypeORM migrations, JWT access and refresh tokens, role-based
+permissions with maker-checker, customer (CIF) management with encrypted PAN, configurable loan products
+(versions, dynamic fields, eligibility rules, workflows), agreement templates, eSign (Digio/Doqufy),
+eNACH, disbursement, Easebuzz payment collection, repayment tracking with a nightly overdue job,
+notifications, admin analytics, Swagger docs, and a tamper-evident audit log.
 
 ## Tech Stack
 
-- Backend: NestJS, TypeORM, MySQL, JWT, bcrypt, class-validator
+- Backend: NestJS, TypeORM, MySQL 8, JWT, bcrypt, class-validator, @nestjs/schedule
 - Frontend: React, React Router, Tailwind CSS, Axios, Recharts
-- Auth: JWT access tokens with role-based USER and ADMIN access
+- Security: role permissions, maker-checker, AES-256-GCM encryption for PAN and provider secrets
 - Audit: SHA-256 chained audit log with integrity verification
 
 ## Project Structure
 
 ```text
-backend/
-  src/
-    database/
-      entities/
-      migrations/
-      seed.ts
-    admin/
-    audit-log/
-    auth/
-    common/
-    loans/
-    notifications/
-    repayments/
-    users/
-frontend/
-  src/
-    api/
-    components/
-    context/
-    layouts/
-    pages/
+backend/src/
+  admin/            dashboard, staff management, application review, repayments
+  audit-log/        hash-chained audit trail
+  auth/             login, refresh, logout, /auth/me (returns effective permissions)
+  common/           role-permissions, guards, tenancy scope, PII crypto
+  customers/        borrower records (CIF)
+  database/         entities, migrations, seed.ts (demo), tenant-init.ts (production onboarding)
+  jobs/             nightly jobs (overdue EMIs)
+  lending-platform/ products, partners, providers, configurable applications, documents, eSign/eNACH/disbursement
+  loans/            EMI and schedule calculations, simple approve/reject
+  payments/         Easebuzz payment links and webhooks
+  repayments/       repayment status and overdue handling
+  storage/          local file storage (swap for S3 later)
+  tenant/           public branding endpoint for the shared frontend
+frontend/src/       staff portal
+deploy/             Nginx template and scripts for running many NBFCs on one server
 ```
 
 ## Local Setup
@@ -45,15 +45,15 @@ frontend/
 npm install
 ```
 
-2. Create backend environment file:
+2. Create the backend environment file and fill in the DB password and `CREDENTIALS_ENCRYPTION_KEY`:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-3. Start MySQL, create a database named `loan_management`, and update `backend/.env` if needed.
+3. Start MySQL 8 and create a database named `loan_management`.
 
-4. Run database migration and seed data:
+4. Run migrations and load demo data:
 
 ```bash
 npm run db:migrate
@@ -66,137 +66,88 @@ npm run db:seed
 npm run dev
 ```
 
-Backend runs on `http://localhost:3000`.
-Frontend runs on `http://localhost:5173`.
-Swagger API docs are available at `http://localhost:3000/api/docs`.
+Backend: `http://localhost:3000` (Swagger at `/api/docs`). Frontend: `http://localhost:5173`
+(set `VITE_API_URL` in `frontend/.env` to the backend URL).
 
-## Demo Accounts
+## Demo Accounts (from `db:seed`)
 
-- Admin: `admin@demo.bank` / `Admin@12345`
-- User: `maya@example.com` / `User@12345`
-- User: `arjun@example.com` / `User@12345`
+| Role | Email | Password |
+|---|---|---|
+| Super admin (vendor) | `superadmin@demo.bank` | `Super@12345` |
+| NBFC admin | `admin@demo.bank` | `Admin@12345` |
+| Credit officer | `credit@demo.bank` | `Credit@12345` |
+| Operations | `staff@demo.bank` | `Staff@12345` |
+| Collections | `collections@demo.bank` | `Collect@12345` |
 
-## Backend Commands
+Demo customers: Maya Sharma (`CUSDEMO0001`) and Arjun Mehta (`CUSDEMO0002`).
+
+## Roles
+
+| Role | Access |
+|---|---|
+| `SUPER_ADMIN` | Platform vendor. Everything, across organizations. Hidden from NBFC staff lists and cannot be edited by NBFC admins. Created only by `tenant:init`. |
+| `ADMIN` | NBFC administrator: staff, configuration, providers and all loan work. |
+| `CREDIT_OFFICER` | Customers, capture applications, approve/reject. |
+| `OPERATIONS` | Customers, capture applications, agreements, eSign, eNACH, disbursement. |
+| `COLLECTIONS` | Repayments, mark EMIs paid, payment links. |
+| `VIEWER` | Read-only. |
+
+Permissions live in `backend/src/common/auth/role-permissions.ts`. The staff member who captured an
+application cannot approve it (maker-checker, `MAKER_CHECKER_ENABLED`).
+
+## Running for Multiple NBFCs
+
+See [deploy/README.md](deploy/README.md). In short: one server, one build, and per NBFC a database, an env
+file (`ENV_FILE=/etc/lms/tenants/<code>.env`), a PM2 process and a subdomain. `deploy/scripts/new-tenant.sh`
+onboards an NBFC; `npm run tenant:init` (run by that script) creates the organization, your
+`SUPER_ADMIN` and the NBFC's first `ADMIN`.
+
+## Commands
 
 ```bash
 npm --workspace backend run start:dev
 npm --workspace backend run build
 npm --workspace backend test
 npm --workspace backend run db:migrate
-npm --workspace backend run db:seed
-```
-
-## Frontend Commands
-
-```bash
+npm --workspace backend run db:seed        # demo data (local only)
+npm --workspace backend run tenant:init    # production onboarding, reads TENANT_* / SUPER_ADMIN_* / NBFC_ADMIN_*
 npm --workspace frontend run dev
 npm --workspace frontend run build
-npm --workspace frontend run preview
 ```
-
-## Major Modules
-
-- `auth`: registration, login, JWT strategy, password hashing, `/auth/me`
-- `auth`: registration, login, refresh tokens, logout, JWT strategy, password hashing, `/auth/me`
-- `users`: profile updates, password changes, and safe user serialization
-- `loans`: drafts, submission, review workflow, transparent risk scoring, EMI calculation, user loan views
-- `lending-platform`: configurable organization, partner, product, provider, workflow, dynamic application, agreement, eSign, eNACH, disbursement, webhook, and ledger foundation
-- `repayments`: repayment schedules, demo payment marking, overdue tracking, reminder metadata, status updates
-- `notifications`: in-app notifications, unread filters, priorities, related action links, mark-all-read
-- `admin`: analytics dashboards, paginated user management, loan review, repayment monitoring
-- `audit-log`: blockchain-style chained audit records, search/pagination, and chain verification
-- `database`: TypeORM configuration, MySQL entities, migrations, and seed data
-
-## Assumptions
-
-- This is a demo application, so payment collection is mocked by marking repayments as paid.
-- Admin approval creates and activates a loan immediately, then generates the repayment schedule.
-- The rule-based score is deterministic and intentionally transparent; higher scores mean lower lending risk.
-- JWTs are stored in `localStorage` for demo convenience. A production app should prefer hardened cookie/session handling.
-- The app does not integrate with real banking, KYC, credit bureau, or payment APIs.
 
 ## API Overview
 
-Auth:
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `GET /auth/me`
+Auth: `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`
 
-Users:
-- `GET /users/profile`
-- `PATCH /users/profile`
-- `PATCH /users/profile/password`
+Staff profile: `GET /users/profile`, `PATCH /users/profile`, `PATCH /users/profile/password`
 
-Loans:
-- `POST /loans/apply`
-- `POST /loans/drafts`
-- `PATCH /loans/applications/:id`
-- `POST /loans/applications/:id/submit`
-- `GET /loans/my`
-- `GET /loans/:id`
-- `POST /loans/:id/calculate-emi`
-- `GET /loans/:id/repayment-schedule`
+Tenant (public): `GET /tenant/branding`
 
-Repayments:
-- `GET /repayments/my`
-- `POST /repayments/:id/mark-paid`
-
-Notifications:
-- `GET /notifications`
-- `PATCH /notifications/:id/read`
-- `PATCH /notifications/read-all`
+Customers: `GET /api/v1/customers`, `POST /api/v1/customers`, `GET /api/v1/customers/:id`, `PATCH /api/v1/customers/:id`
 
 Admin:
 - `GET /admin/dashboard`
-- `GET /admin/users`
-- `GET /admin/users/:id`
-- `GET /admin/loan-applications`
-- `GET /admin/loan-applications/:id`
-- `PATCH /admin/loan-applications/:id/approve`
-- `PATCH /admin/loan-applications/:id/reject`
-- `GET /admin/repayments`
-- `PATCH /admin/repayments/:id/status`
+- `GET /admin/loan-applications`, `GET /admin/loan-applications/:id`
+- `PATCH /admin/loan-applications/:id/approve`, `PATCH /admin/loan-applications/:id/reject`
+- `GET /admin/repayments`, `PATCH /admin/repayments/:id/status`
+- `GET /admin/staff-users`, `POST /admin/staff-users`, `PATCH /admin/staff-users/:id`
 
-Configurable lending APIs:
-- `POST /api/v1/organizations`
-- `GET /api/v1/organizations`
-- `POST /api/v1/products`
-- `GET /api/v1/products`
-- `POST /api/v1/products/:id/publish`
+Configurable lending:
+- `GET|POST /api/v1/organizations`, `GET|POST /api/v1/products`, `POST /api/v1/products/:id/publish`
 - `GET /api/v1/products/:id/application-schema`
-- `POST /api/v1/partners`
-- `POST /api/v1/partners/:id/products`
-- `POST /api/v1/loan-applications`
-- `POST /api/v1/loan-applications/:id/submit`
-- `POST /api/v1/loan-applications/:id/approve`
-- `POST /api/v1/loan-applications/:id/agreements/generate`
-- `POST /api/v1/loan-applications/:id/esign/initiate`
-- `POST /api/v1/loan-applications/:id/enach/initiate`
-- `POST /api/v1/loan-applications/:id/disbursements`
-- `POST /api/v1/webhooks/esign/:providerCode`
-- `POST /api/v1/webhooks/enach/:providerCode`
-- `POST /api/v1/webhooks/disbursement/:providerCode`
+- `GET|POST /api/v1/partners`, `POST /api/v1/partners/:id/products`
+- `POST /api/v1/loan-applications` (with `customerId`, or `applicant.fullName` + `applicant.phone` for a new customer)
+- `POST /api/v1/loan-applications/:id/submit`, `/approve`, `/reject`, `/advance`
+- `POST /api/v1/loan-applications/:id/agreements/generate`, `/esign/initiate`, `/enach/initiate`, `/disbursements`
+- `POST /api/v1/repayments/:id/collect`
+- Webhooks: `POST /api/v1/webhooks/{esign|enach|disbursement}/:providerCode`, `POST /api/v1/webhooks/payment/:providerCode`
 
-Audit logs:
-- `GET /audit-logs`
-- `GET /audit-logs/verify`
+Audit logs: `GET /audit-logs`, `GET /audit-logs/verify`
 
-## Production-Style Enhancements
+## Notes
 
-- Access tokens are short-lived and paired with stored hashed refresh tokens for session rotation and logout.
-- Product and partner configuration is versioned and snapshotted on configurable application submission.
-- Mock provider flows require signed webhook-style completion instead of direct client completion.
-- Loan applications can be saved as drafts, submitted, moved into review, approved, or rejected with status history.
-- Loan scoring returns category-level point breakdowns, ratios, strengths, and concerns.
-- Repayments track overdue days, overdue timestamps, and reminder timestamps.
-- Admin list screens support search, filters, and pagination.
-- The frontend includes reusable loading, error, empty, pagination, score breakdown, and responsive table patterns.
-- Backend unit tests cover EMI/scoring logic, repayment overdue utilities, audit hashing, and audit chain verification.
-- Lending platform unit tests cover safe eligibility-rule execution and invalid workflow transition blocking.
-
-## Migration Note
-
-The new migration is additive. If a local database already has application tables but an empty `migrations` table, TypeORM will try to replay the initial migrations and fail with `Table 'users' already exists`. Baseline the existing migration history or migrate a fresh database before running `npm run db:migrate`.
-# Loan-Management-System
+- Money columns are `DECIMAL`; the API still returns them as numbers.
+- PAN is stored encrypted with a keyed hash for duplicate checks; only the masked value is ever returned.
+- Keep `CREDENTIALS_ENCRYPTION_KEY` stable and backed up. Changing or losing it makes encrypted PAN and provider secrets unreadable.
+- Migration `1758500000000-CustomersAndStaffRoles` moves existing borrower users into `customers` (same ids), maps old roles (`ADMIN` without an organization becomes `SUPER_ADMIN`, `USER` becomes `OPERATIONS`), and converts money columns to `DECIMAL`. Back up the database before running it on existing data.
+- If a local database already has tables but an empty `migrations` table, TypeORM will try to replay the initial migrations. Baseline the migration history or migrate a fresh database.

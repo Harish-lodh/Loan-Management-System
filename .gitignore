@@ -5,3 +5,5 @@ backend/.env
 frontend/.env
 coverage/
 *.log
+storage/
+backend/storage/

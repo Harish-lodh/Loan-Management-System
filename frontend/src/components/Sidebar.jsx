@@ -7,6 +7,7 @@ import {
   Calculator,
   ChevronLeft,
   ChevronRight,
+  FilePlus2,
   Handshake,
   History,
   Landmark,
@@ -14,61 +15,58 @@ import {
   PlugZap,
   Receipt,
   Settings,
+  UserCog,
   Users,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useBranding } from '../context/BrandingContext';
 
-const staffGroups = [
+// Each link declares the permission it needs; the sidebar only shows what the signed-in role can open.
+const groups = [
   {
     title: 'Dashboard',
-    links: [{ to: '/admin', label: 'Overview', icon: BarChart3 }],
+    links: [{ to: '/admin', label: 'Overview', icon: BarChart3, permission: 'dashboard.view' }],
   },
   {
     title: 'Customers',
-    links: [{ to: '/admin/users', label: 'Customer List', icon: Users }],
+    links: [{ to: '/admin/customers', label: 'Customers', icon: Users, permission: 'customer.view' }],
   },
   {
     title: 'Loans',
     links: [
-      { to: '/admin/applications', label: 'Loan Applications', icon: ClipboardList },
-      { to: '/admin/repayments', label: 'Repayments', icon: Receipt },
+      { to: '/admin/applications/new', label: 'New Application', icon: FilePlus2, permission: 'application.create' },
+      { to: '/admin/applications', label: 'Loan Applications', icon: ClipboardList, permission: 'application.view', end: true },
+      { to: '/admin/repayments', label: 'Repayments', icon: Receipt, permission: 'repayment.view' },
       { to: '/calculator', label: 'EMI Calculator', icon: Calculator },
     ],
   },
   {
     title: 'Configuration',
     links: [
-      { to: '/admin/configuration', label: 'Overview', icon: Settings, end: true },
-      { to: '/admin/configuration/products', label: 'Loan Products', icon: PackagePlus },
-      { to: '/admin/configuration/partners', label: 'Partners', icon: Handshake },
-      { to: '/admin/configuration/providers', label: 'Providers', icon: PlugZap },
-      { to: '/admin/configuration/organization', label: 'Organization Settings', icon: Building2 },
+      { to: '/admin/configuration', label: 'Overview', icon: Settings, end: true, permission: 'product.view' },
+      { to: '/admin/configuration/products', label: 'Loan Products', icon: PackagePlus, permission: 'product.view' },
+      { to: '/admin/configuration/partners', label: 'Partners', icon: Handshake, permission: 'partner.view' },
+      { to: '/admin/configuration/providers', label: 'Providers', icon: PlugZap, permission: 'provider.configure' },
+      { to: '/admin/configuration/organization', label: 'Organization Settings', icon: Building2, permission: 'organization.update' },
     ],
   },
   {
     title: 'Administration',
     links: [
-      { to: '/admin/staff-users', label: 'Staff Users', icon: Users },
+      { to: '/admin/staff-users', label: 'Staff Users', icon: UserCog, permission: 'staff.manage' },
       { to: '/notifications', label: 'Notifications', icon: Bell },
-      { to: '/admin/audit-logs', label: 'Audit Logs', icon: History },
-    ],
-  },
-];
-
-const limitedStaffGroups = [
-  {
-    title: 'Account',
-    links: [
-      { to: '/calculator', label: 'EMI Calculator', icon: Calculator },
-      { to: '/notifications', label: 'Notifications', icon: Bell },
+      { to: '/admin/audit-logs', label: 'Audit Logs', icon: History, permission: 'audit.view' },
     ],
   },
 ];
 
 export default function Sidebar({ open, collapsed, onClose, onToggle }) {
-  const { isAdmin } = useAuth();
-  const groups = isAdmin ? staffGroups : limitedStaffGroups;
+  const { can } = useAuth();
+  const branding = useBranding();
+  const visibleGroups = groups
+    .map((group) => ({ ...group, links: group.links.filter((link) => !link.permission || can(link.permission)) }))
+    .filter((group) => group.links.length);
   const width = collapsed ? 'lg:w-20' : 'lg:w-72';
 
   return (
@@ -79,12 +77,16 @@ export default function Sidebar({ open, collapsed, onClose, onToggle }) {
         }`}
       >
         <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4">
-          <NavLink to={isAdmin ? '/admin' : '/profile'} className="flex min-w-0 items-center gap-3" onClick={onClose}>
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-bank text-white">
-              <Landmark size={19} />
-            </span>
+          <NavLink to={can('dashboard.view') ? '/admin' : '/profile'} className="flex min-w-0 items-center gap-3" onClick={onClose}>
+            {branding.logoUrl ? (
+              <img src={branding.logoUrl} alt="" className="h-9 w-9 shrink-0 rounded-md object-contain" />
+            ) : (
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-bank text-white">
+                <Landmark size={19} />
+              </span>
+            )}
             <span className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
-              <span className="block truncate text-sm font-semibold text-slate-950">LedgerLine</span>
+              <span className="block truncate text-sm font-semibold text-slate-950">{branding.name}</span>
               <span className="block truncate text-xs text-slate-500">Loan management</span>
             </span>
           </NavLink>
@@ -93,7 +95,7 @@ export default function Sidebar({ open, collapsed, onClose, onToggle }) {
           </button>
         </div>
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <div key={group.title}>
               <p className={`mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400 ${collapsed ? 'lg:sr-only' : ''}`}>
                 {group.title}

@@ -311,7 +311,7 @@ export class LendingPlatformFoundation1715690000000 implements MigrationInterfac
         options json NULL,
         visibilityConditions json NULL,
         editableStatuses json NULL,
-        sensitive tinyint NOT NULL DEFAULT 0,
+        \`sensitive\` tinyint NOT NULL DEFAULT 0,
         createdAt datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         updatedAt datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
         UNIQUE INDEX IDX_product_fields_unique (productId, fieldKey),

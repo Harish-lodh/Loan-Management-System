@@ -7,7 +7,7 @@ import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 export default function ProfilePage() {
   const { refreshUser } = useAuth();
-  const [form, setForm] = useState({ name: '', phone: '', address: '', occupation: '', annualIncome: '' });
+  const [form, setForm] = useState({ name: '', phone: '', address: '', occupation: '' });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -23,7 +23,6 @@ export default function ProfilePage() {
           phone: response.data.phone || '',
           address: response.data.address || '',
           occupation: response.data.occupation || '',
-          annualIncome: response.data.annualIncome || '',
         });
       })
       .catch((err) => setError(showErrorToast(err)))
@@ -40,10 +39,7 @@ export default function ProfilePage() {
     setError('');
     setMessage('');
     try {
-      await api.patch('/users/profile', {
-        ...form,
-        annualIncome: form.annualIncome === '' ? undefined : Number(form.annualIncome),
-      });
+      await api.patch('/users/profile', form);
       await refreshUser();
       setMessage('Profile updated.');
       showSuccessToast('Profile updated');
@@ -78,7 +74,7 @@ export default function ProfilePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-950">Profile</h1>
-        <p className="mt-1 text-sm text-slate-500">Keep your customer profile and account security details current.</p>
+        <p className="mt-1 text-sm text-slate-500">Keep your staff profile and account security details current.</p>
       </div>
       {error ? <div className="rounded-md bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
       {message ? <div className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{message}</div> : null}
@@ -95,17 +91,9 @@ export default function ProfilePage() {
               <label>Phone</label>
               <input value={form.phone} onChange={(event) => update('phone', event.target.value)} />
             </div>
-            <div>
-              <label>Occupation</label>
+            <div className="md:col-span-2">
+              <label>Designation</label>
               <input value={form.occupation} onChange={(event) => update('occupation', event.target.value)} />
-            </div>
-            <div>
-              <label>Annual income</label>
-              <input
-                type="number"
-                value={form.annualIncome}
-                onChange={(event) => update('annualIncome', event.target.value)}
-              />
             </div>
             <div className="md:col-span-2">
               <label>Address</label>

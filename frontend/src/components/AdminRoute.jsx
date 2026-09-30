@@ -2,15 +2,17 @@ import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-export default function AdminRoute() {
-  const { isAdmin, loading } = useAuth();
+// Guards a group of routes by permission. Without a permission it only requires a signed-in staff user.
+export default function AdminRoute({ permission }) {
+  const { can, loading } = useAuth();
 
   if (loading) {
-    return <div className="p-8 text-sm text-slate-500">Loading admin workspace...</div>;
+    return <div className="p-8 text-sm text-slate-500">Loading workspace...</div>;
   }
 
-  if (!isAdmin) {
-    return <Navigate to="/profile" replace />;
+  if (permission && !can(permission)) {
+    const fallback = permission !== 'dashboard.view' && can('dashboard.view') ? '/admin' : '/profile';
+    return <Navigate to={fallback} replace />;
   }
 
   return <Outlet />;

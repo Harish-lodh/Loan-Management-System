@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import ScoreBreakdown from '../../components/ScoreBreakdown';
 import StatusBadge from '../../components/StatusBadge';
+import { useAuth } from '../../context/AuthContext';
 import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
 export default function LoanReviewDetailsPage() {
   const { id } = useParams();
+  const { can, user } = useAuth();
   const navigate = useNavigate();
   const [application, setApplication] = useState(null);
   const [comment, setComment] = useState('');
@@ -64,7 +66,12 @@ export default function LoanReviewDetailsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-950">Review application</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {application.user?.name} - {application.user?.email}
+            {application.customer ? (
+              <Link className="font-semibold text-bank" to={`/admin/customers/${application.customer.id}`}>
+                {application.customer.fullName}
+              </Link>
+            ) : null}{' '}
+            · {application.customer?.phone} · {application.applicationNumber || application.id}
           </p>
         </div>
         <StatusBadge status={application.status} />
@@ -119,21 +126,26 @@ export default function LoanReviewDetailsPage() {
           ))}
         </div>
       </section>
+      {can('application.approve') || can('application.reject') ? (
       <section className="panel p-5">
-        <label>Admin comment</label>
+        <label>Review comment</label>
         <textarea className="mt-2" rows={4} value={comment} onChange={(event) => setComment(event.target.value)} />
         {application.status === 'DRAFT' ? (
-          <p className="mt-2 text-sm text-amber-700">Draft applications must be submitted by the customer before staff review.</p>
+          <p className="mt-2 text-sm text-amber-700">Draft applications must be submitted before they can be reviewed.</p>
+        ) : null}
+        {application.createdById === user?.id ? (
+          <p className="mt-2 text-sm text-amber-700">You captured this application, so another staff member must approve it (maker-checker).</p>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-3">
-          <button className="btn-primary" onClick={approve} disabled={loading || reviewLocked}>
+          <button className="btn-primary" onClick={approve} disabled={loading || reviewLocked || !can('application.approve') || application.createdById === user?.id}>
             Approve loan
           </button>
-          <button className="btn-secondary" onClick={reject} disabled={loading || comment.trim().length < 5 || reviewLocked}>
+          <button className="btn-secondary" onClick={reject} disabled={loading || comment.trim().length < 5 || reviewLocked || !can('application.reject')}>
             Reject loan
           </button>
         </div>
       </section>
+      ) : null}
     </div>
   );
 }

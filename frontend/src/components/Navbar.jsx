@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Bell, LogOut, Menu, Search, UserCircle } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { ROLE_LABELS, useAuth } from '../context/AuthContext';
 
 const titles = [
+  ['/admin/applications/new', 'New Application'],
   ['/admin/configuration/products/new', 'Create Loan Product'],
   ['/admin/configuration/products', 'Loan Products'],
   ['/admin/configuration/organization', 'Organization Settings'],
@@ -13,7 +14,7 @@ const titles = [
   ['/admin/applications', 'Loan Applications'],
   ['/admin/repayments', 'Repayments'],
   ['/admin/audit-logs', 'Audit Logs'],
-  ['/admin/users', 'Customer List'],
+  ['/admin/customers', 'Customers'],
   ['/admin/staff-users', 'Staff Users'],
   ['/admin', 'Dashboard'],
   ['/notifications', 'Notifications'],
@@ -32,7 +33,7 @@ export default function Navbar({ onMenu }) {
     event.preventDefault();
     const query = search.trim();
     if (!query) return;
-    navigate(`/admin/users?search=${encodeURIComponent(query)}`);
+    navigate(`/admin/customers?search=${encodeURIComponent(query)}`);
   }
 
   return (
@@ -56,7 +57,7 @@ export default function Navbar({ onMenu }) {
                 className="pl-9"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search customers, loans, or applications"
+                placeholder="Search customers by name or mobile"
               />
             </form>
             <Link className="btn-secondary px-2 py-2" to="/notifications" title="Notifications">
@@ -67,7 +68,7 @@ export default function Navbar({ onMenu }) {
             </Link>
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold">{user.name}</p>
-              <p className="text-xs text-slate-500">{user.role}</p>
+              <p className="text-xs text-slate-500">{ROLE_LABELS[user.role] ?? user.role}</p>
             </div>
             <button
               className="btn-secondary px-2 py-2"

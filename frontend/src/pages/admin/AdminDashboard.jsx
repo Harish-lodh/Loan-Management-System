@@ -31,7 +31,7 @@ export default function AdminDashboard() {
         <p className="mt-1 text-sm text-slate-500">Portfolio health, loan decisions, and repayment operations.</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Users" value={summary.totalUsers} icon={Users} />
+        <StatCard title="Customers" value={summary.totalCustomers} icon={Users} />
         <StatCard title="Applications" value={summary.totalLoanApplications} icon={FileText} />
         <StatCard title="Approved" value={summary.approvedLoans} icon={CheckCircle2} />
         <StatCard title="Rejected" value={summary.rejectedLoans} icon={XCircle} />

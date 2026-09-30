@@ -43,7 +43,7 @@ export default function LoanApplicationsPage() {
         <div className="flex flex-wrap gap-2">
           <input
             className="w-56"
-            placeholder="Search applicant or purpose"
+            placeholder="Search customer, mobile or application no."
             value={filters.search}
             onChange={(event) => setFilters({ ...filters, search: event.target.value, page: 1 })}
           />
@@ -79,7 +79,10 @@ export default function LoanApplicationsPage() {
               <tbody className="divide-y divide-slate-100">
                 {data.items.map((application) => (
                   <tr key={application.id}>
-                    <td className="px-4 py-3">{application.user?.name}</td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{application.customer?.fullName}</p>
+                      <p className="text-xs text-slate-500">{application.applicationNumber || application.customer?.customerNumber}</p>
+                    </td>
                     <td className="px-4 py-3">{money.format(application.amount)}</td>
                     <td className="px-4 py-3">{money.format(application.emi)}</td>
                     <td className="px-4 py-3">{application.riskScore}/100</td>

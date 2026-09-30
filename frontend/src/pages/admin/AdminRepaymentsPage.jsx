@@ -3,12 +3,14 @@ import { api } from '../../api/client';
 import { ErrorState, LoadingState } from '../../components/AsyncState';
 import PaginationControls from '../../components/PaginationControls';
 import StatusBadge from '../../components/StatusBadge';
+import { useAuth } from '../../context/AuthContext';
 import { showErrorToast, showSuccessToast } from '../../utils/toast';
 
 const statuses = ['', 'PENDING', 'PAID', 'OVERDUE'];
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
 export default function AdminRepaymentsPage() {
+  const { can } = useAuth();
   const [data, setData] = useState({ items: [], meta: null });
   const [filters, setFilters] = useState({ status: '', search: '', page: 1 });
   const [loading, setLoading] = useState(true);
@@ -116,7 +118,7 @@ export default function AdminRepaymentsPage() {
               <tbody className="divide-y divide-slate-100">
                 {data.items.map((repayment) => (
                   <tr key={repayment.id}>
-                    <td className="px-4 py-3">{repayment.user?.name}</td>
+                    <td className="px-4 py-3">{repayment.customer?.fullName}</td>
                     <td className="px-4 py-3">{new Date(repayment.dueDate).toLocaleDateString()}</td>
                     <td className="px-4 py-3">{money.format(repayment.emiAmount)}</td>
                     <td className="px-4 py-3">{repayment.daysOverdue ? `${repayment.daysOverdue} days` : '-'}</td>
@@ -128,6 +130,7 @@ export default function AdminRepaymentsPage() {
                         value={repayment.status}
                         onChange={(event) => updateStatus(repayment.id, event.target.value)}
                         className="max-w-[11rem]"
+                        disabled={!can('repayment.update') || repayment.status === 'PAID'}
                       >
                         {statuses.slice(1).map((option) => (
                           <option key={option} value={option}>
@@ -137,7 +140,7 @@ export default function AdminRepaymentsPage() {
                       </select>
                     </td>
                     <td className="px-4 py-3">
-                      {repayment.status === 'PAID' ? (
+                      {repayment.status === 'PAID' || !can('payment.collect') ? (
                         '-'
                       ) : paymentLinks[repayment.id] ? (
                         <button className="font-semibold text-bank" onClick={() => copyLink(paymentLinks[repayment.id])}>

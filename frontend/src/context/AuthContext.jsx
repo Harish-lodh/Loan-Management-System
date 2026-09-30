@@ -3,12 +3,26 @@ import { api, clearAuthSession, getAccessToken, setAuthSession } from '../api/cl
 
 const AuthContext = createContext(null);
 
+export const ROLE_LABELS = {
+  SUPER_ADMIN: 'Platform Admin',
+  ADMIN: 'Admin',
+  CREDIT_OFFICER: 'Credit Officer',
+  OPERATIONS: 'Operations',
+  COLLECTIONS: 'Collections',
+  VIEWER: 'Viewer',
+};
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     const stored = localStorage.getItem('loan_app_user');
     return stored ? JSON.parse(stored) : null;
   });
   const [loading, setLoading] = useState(true);
+
+  function storeUser(nextUser) {
+    localStorage.setItem('loan_app_user', JSON.stringify(nextUser));
+    setUser(nextUser);
+  }
 
   useEffect(() => {
     const token = getAccessToken();
@@ -19,10 +33,7 @@ export function AuthProvider({ children }) {
 
     api
       .get('/auth/me')
-      .then((response) => {
-        setUser(response.data);
-        localStorage.setItem('loan_app_user', JSON.stringify(response.data));
-      })
+      .then((response) => storeUser(response.data))
       .catch(() => {
         clearAuthSession();
         setUser(null);
@@ -30,12 +41,16 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const value = useMemo(
-    () => ({
+  const value = useMemo(() => {
+    // Permissions are computed by the backend from the staff role; the UI only hides what the API would refuse.
+    const permissions = new Set(user?.effectivePermissions ?? []);
+    return {
       user,
       loading,
       isAuthenticated: Boolean(user),
-      isAdmin: user?.role === 'ADMIN',
+      isAdmin: user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN',
+      isSuperAdmin: user?.role === 'SUPER_ADMIN',
+      can: (permission) => permissions.has(permission),
       async login(email, password) {
         const response = await api.post('/auth/login', { email, password });
         setAuthSession(response.data);
@@ -43,9 +58,8 @@ export function AuthProvider({ children }) {
         return response.data.user;
       },
       async refreshUser() {
-        const response = await api.get('/users/profile');
-        localStorage.setItem('loan_app_user', JSON.stringify(response.data));
-        setUser(response.data);
+        const response = await api.get('/auth/me');
+        storeUser(response.data);
         return response.data;
       },
       async logout() {
@@ -57,9 +71,8 @@ export function AuthProvider({ children }) {
         clearAuthSession();
         setUser(null);
       },
-    }),
-    [loading, user],
-  );
+    };
+  }, [loading, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
